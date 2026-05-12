@@ -287,6 +287,9 @@ local DefaultExplorerSettings = cloneTable(explorerSettings)
 local API
 local RMD
 
+local beginMouseDrag
+local ensureFlatButton
+
 -- Main Variables
 local mouse = Services.Players.LocalPlayer:GetMouse()
 local mouseWindow = nil
@@ -3126,7 +3129,7 @@ local function destroyHandleBucket(bucket)
 	end
 end
 
-local function beginMouseDrag(onMove, onRelease)
+beginMouseDrag = function(onMove, onRelease)
 	local user = Services.UserInputService
 	local moveConnection
 	local endConnection
@@ -3542,7 +3545,7 @@ function f.hideOverlay()
 	end)
 end
 
-local function ensureFlatButton(parent, name, text, width)
+ensureFlatButton = function(parent, name, text, width)
 	local button = parent:FindFirstChild(name)
 	if not button then
 		button = CreateInstance("TextButton",{
