@@ -70,11 +70,40 @@ local BrandConfig = {
 	}
 }
 
+local function cloneTable(tbl)
+	local copy = {}
+	for key,value in pairs(tbl) do
+		copy[key] = type(value) == "table" and cloneTable(value) or value
+	end
+	return copy
+end
+
+local DefaultTheme = cloneTable(BrandConfig.Theme)
+local DefaultRadii = cloneTable(BrandConfig.Radii)
+
 local ViewPresets = {
 	"Dual Docked",
 	"Explorer Only",
 	"Properties Only",
 	"Floating"
+}
+
+local InsertableClasses = {
+	{Name = "Folder", ClassName = "Folder"},
+	{Name = "Model", ClassName = "Model"},
+	{Name = "Part", ClassName = "Part"},
+	{Name = "SpawnLocation", ClassName = "SpawnLocation"},
+	{Name = "Attachment", ClassName = "Attachment"},
+	{Name = "BoolValue", ClassName = "BoolValue"},
+	{Name = "StringValue", ClassName = "StringValue"},
+	{Name = "ObjectValue", ClassName = "ObjectValue"},
+	{Name = "Script", ClassName = "Script"},
+	{Name = "LocalScript", ClassName = "LocalScript"},
+	{Name = "ModuleScript", ClassName = "ModuleScript"},
+	{Name = "RemoteEvent", ClassName = "RemoteEvent"},
+	{Name = "RemoteFunction", ClassName = "RemoteFunction"},
+	{Name = "BindableEvent", ClassName = "BindableEvent"},
+	{Name = "BindableFunction", ClassName = "BindableFunction"}
 }
 
 local Services = setmetatable({},{
@@ -227,6 +256,12 @@ local topMenuViewIcon = topMenuViewButton:WaitForChild("Icon")
 local topMenuViewArrow = topMenuViewButton:WaitForChild("DropDown")
 local topMenuAboutButton = topMenu:WaitForChild("About")
 local topMenuAboutIcon = topMenuAboutButton:WaitForChild("Icon")
+local topMenuSettingsButton
+local topMenuScriptButton
+local topMenuConsoleButton
+local topMenuSaveButton
+local topMenuMinimizeButton
+local topMenuCloseButton
 
 -- Explorer Stuff
 local explorerTree = nil
@@ -246,6 +281,7 @@ local explorerSettings = {
 	LPaneWidth = 300,
 	RPaneWidth = 300
 }
+local DefaultExplorerSettings = cloneTable(explorerSettings)
 
 -- JSON Stuff
 local API
@@ -270,6 +306,20 @@ local overlayVisible = false
 local overlayStartup = false
 local currentViewPreset = ViewPresets[1]
 local loadIssues = {}
+local paneSplitHandles = {Left = {}, Right = {}}
+local paneWidthHandles = {}
+local minimizedWindows = {}
+local uiMinimized = false
+local insertContext = nil
+local chromeInitialized = false
+local scrollThemeCallbacks = {}
+local settingsPanelState = {Fields = {}}
+local scriptViewerState = {
+	Target = nil,
+	Dirty = false,
+	Syncing = false,
+	FollowSelection = true
+}
 
 -- ScrollBar
 function f.buttonArrows(size,num,dir)
@@ -1032,6 +1082,10 @@ local nodes = {}
 
 local explorerPanel
 local propertiesPanel
+local settingsPanel
+local scriptViewerPanel
+local consolePanel
+local saveInstancePanel
 
 local entryTemplate = resources:WaitForChild("Entry")
 
@@ -1620,25 +1674,47 @@ function f.prevProportions(t,ind)
 	return count
 end
 
-function f.buildPanes()
+function f.buildPanes(instant)
 	local function buildPane(items, container, width)
 		for i,v in pairs(items) do
 			v.Window.Parent = container
 			v.Window.Visible = true
-			v.Window:TweenSizeAndPosition(
-				UDim2.new(0,width,v.Proportion,0),
-				UDim2.new(0,0,f.prevProportions(items,i-1),0),
-				Enum.EasingDirection.Out,
-				Enum.EasingStyle.Quart,
-				BrandConfig.Motion.Normal,
-				true
-			)
+			if v.Window:FindFirstChild("ResizeHandle") then
+				v.Window.ResizeHandle.Visible = false
+			end
+			local newSize = UDim2.new(0,width,v.Proportion,0)
+			local newPosition = UDim2.new(0,0,f.prevProportions(items,i-1),0)
+			if instant then
+				v.Window.Size = newSize
+				v.Window.Position = newPosition
+			else
+				v.Window:TweenSizeAndPosition(
+					newSize,
+					newPosition,
+					Enum.EasingDirection.Out,
+					Enum.EasingStyle.Quart,
+					BrandConfig.Motion.Normal,
+					true
+				)
+			end
 		end
 	end
 	buildPane(LPaneItems, contentL, explorerSettings.LPaneWidth)
 	buildPane(RPaneItems, contentR, explorerSettings.RPaneWidth)
-	contentL:TweenPosition(#LPaneItems > 0 and UDim2.new(0,0,0,0) or UDim2.new(0,-explorerSettings.LPaneWidth,0,0), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, BrandConfig.Motion.Normal, true)
-	contentR:TweenPosition(#RPaneItems > 0 and UDim2.new(1,-explorerSettings.RPaneWidth,0,0) or UDim2.new(1,0,0,0), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, BrandConfig.Motion.Normal, true)
+	local leftPosition = #LPaneItems > 0 and UDim2.new(0,0,0,0) or UDim2.new(0,-explorerSettings.LPaneWidth,0,0)
+	local rightPosition = #RPaneItems > 0 and UDim2.new(1,-explorerSettings.RPaneWidth,0,0) or UDim2.new(1,0,0,0)
+	contentL.Visible = not uiMinimized
+	contentR.Visible = not uiMinimized
+	if instant then
+		contentL.Position = leftPosition
+		contentR.Position = rightPosition
+	else
+		contentL:TweenPosition(leftPosition, Enum.EasingDirection.Out, Enum.EasingStyle.Quart, BrandConfig.Motion.Normal, true)
+		contentR:TweenPosition(rightPosition, Enum.EasingDirection.Out, Enum.EasingStyle.Quart, BrandConfig.Motion.Normal, true)
+	end
+	if f.rebuildPaneHandles then
+		f.rebuildPaneHandles(instant)
+	end
 end
 
 function f.distance(x1,y1,x2,y2)
@@ -1708,6 +1784,9 @@ function f.removeFromPane(window)
 
 		table.remove(pane,windowIndex)
 		window.Parent = gui
+		if window:FindFirstChild("ResizeHandle") then
+			window.ResizeHandle.Visible = true
+		end
 		f.buildPanes()
 	end
 end
@@ -1869,9 +1948,23 @@ end
 function f.hookWindowListener(window)
 	local selected = false
 	local user = Services.UserInputService
+	local function overChromeAction()
+		for _,name in ipairs({"Close","Settings","AddButton"}) do
+			local button = window.TopBar:FindFirstChild(name)
+			if button and f.checkMouseInGui(button) then
+				return true
+			end
+		end
+		local searchFrame = window.TopBar:FindFirstChild("SearchFrame")
+		if searchFrame and searchFrame.Visible ~= false and f.checkMouseInGui(searchFrame) then
+			return true
+		end
+		return false
+	end
 	
 	window.TopBar.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if overChromeAction() then return end
 			selected = true
 			local selectedInit = false
 			local initPos = {mouse.X,mouse.Y}
@@ -1897,7 +1990,13 @@ function f.hookWindowListener(window)
 			
 			mouseEvent = user.InputChanged:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseMovement and (selectedInit or f.distance(initPos[1],initPos[2],mouse.X,mouse.Y) >= (inPane and 20 or 5)) then
-					if not selectedInit then selectedInit = true window.Position = UDim2.new(0,mouse.X-dragOffX,0,mouse.Y-dragOffY) window.Parent = nil end
+					if not selectedInit then
+						selectedInit = true
+						window:SetAttribute("FloatWidth", math.max(window.AbsoluteSize.X, 280))
+						window:SetAttribute("FloatHeight", math.max(window.AbsoluteSize.Y, 240))
+						window.Position = UDim2.new(0,mouse.X-dragOffX,0,mouse.Y-dragOffY)
+						window.Parent = nil
+					end
 					for i,v in pairs(LPaneItems) do if v.Window == window then f.removeFromPane(window,"Left") break end end
 					for i,v in pairs(RPaneItems) do if v.Window == window then f.removeFromPane(window,"Right") break end end
 					
@@ -1906,7 +2005,10 @@ function f.hookWindowListener(window)
 					
 					window.Parent = gui
 					window.Position = UDim2.new(0,mouse.X-dragOffX,0,mouse.Y-dragOffY)
-					window.Size = UDim2.new(0,window.Size.X.Offset,0,300)
+					window.Size = UDim2.new(0,window:GetAttribute("FloatWidth") or math.max(window.AbsoluteSize.X, 320),0,window:GetAttribute("FloatHeight") or math.max(window.AbsoluteSize.Y, 320))
+					if window:FindFirstChild("ResizeHandle") then
+						window.ResizeHandle.Visible = true
+					end
 				end
 			end)
 		end
@@ -1928,6 +2030,29 @@ function f.hookWindowListener(window)
 			window.Parent = gui
 		end
 	end)
+
+	if window:FindFirstChild("ResizeHandle") then
+		window.ResizeHandle.InputBegan:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+			if f.checkInPane(window) then return end
+			local startMouseX = mouse.X
+			local startMouseY = mouse.Y
+			local startWidth = window.AbsoluteSize.X
+			local startHeight = window.AbsoluteSize.Y
+			beginMouseDrag(function()
+				local maxWidth = math.max(280, gui.AbsoluteSize.X - window.AbsolutePosition.X + 20)
+				local maxHeight = math.max(220, gui.AbsoluteSize.Y - window.AbsolutePosition.Y + 20)
+				local newWidth = math.clamp(startWidth + (mouse.X - startMouseX), 260, maxWidth)
+				local newHeight = math.clamp(startHeight + (mouse.Y - startMouseY), 220, maxHeight)
+				window.Size = UDim2.new(0,newWidth,0,newHeight)
+				window:SetAttribute("FloatWidth", newWidth)
+				window:SetAttribute("FloatHeight", newHeight)
+				if window:FindFirstChild("Content") then
+					window.Content.Size = UDim2.new(1,-2,1,-50)
+				end
+			end)
+		end)
+	end
 	
 	window.TopBar.Close.MouseEnter:Connect(function()
 		window.TopBar.Close.BackgroundTransparency = 0.5
@@ -1938,7 +2063,11 @@ function f.hookWindowListener(window)
 	end)
 	
 	window.TopBar.Close.MouseButton1Click:Connect(function()
-		if f.checkInPane(window) then f.removeFromPane(window) window.Visible = false return end
+		if f.checkInPane(window) then
+			f.removeFromPane(window)
+			window.Visible = false
+			return
+		end
 		window.Content:TweenSize(UDim2.new(1,-2,0,0),Enum.EasingDirection.Out,Enum.EasingStyle.Quad,BrandConfig.Motion.Normal,true)
 		task.wait(BrandConfig.Motion.Normal)
 		window.Visible = false
@@ -1988,14 +2117,7 @@ function f.rightClick()
 	
 	local selection = explorerTree.Selection
 	local function refreshPanels(rebuildExplorer)
-		if rebuildExplorer then
-			explorerTree:TreeUpdate()
-		end
-		explorerTree:Refresh()
-		if propertiesTree then
-			propertiesTree:TreeUpdate()
-			propertiesTree:Refresh()
-		end
+		f.refreshDataPanels(rebuildExplorer)
 	end
 	
 	rightClickContext:Add({Name = "Cut", Icon = f.icon(nil,iconIndex.CUT_ICON), DisabledIcon = f.icon(nil,iconIndex.CUT_D_ICON), Shortcut = "Ctrl+X", Disabled = #selection.List == 0, OnClick = function()
@@ -2042,20 +2164,22 @@ function f.rightClick()
 		refreshPanels(true)
 	end})
 	
-	rightClickContext:Add({Name = "Delete", Icon = f.icon(nil,iconIndex.DELETE_ICON), DisabledIcon = f.icon(nil,iconIndex.DELETE_D_ICON), Shortcut = "Del", Disabled = #selection.List == 0, OnClick = function()
-		pcall(function()
-			for _,v in pairs(selection.List) do
-				v:Destroy()
-			end
-		end)
+	rightClickContext:Add({Name = "Delete", Icon = f.icon(nil,iconIndex.DELETE_ICON), DisabledIcon = f.icon(nil,iconIndex.DELETE_D_ICON), Shortcut = "Del / Backspace", Disabled = #selection.List == 0, OnClick = function()
 		rightClickContext:Hide()
-		refreshPanels(true)
+		f.deleteSelection()
 	end})
 	
 	rightClickContext:Add({Name = "Rename", Icon = "", DisabledIcon = "", Shortcut = "Ctrl+R", Disabled = #selection.List == 0, OnClick = function()
 		rightClickContext:Hide()
 		task.defer(function()
 			f.startInlineRename(selection.List[1])
+		end)
+	end})
+
+	rightClickContext:Add({Name = "Add Child", Icon = f.icon(nil,iconIndex.Model), DisabledIcon = f.icon(nil,iconIndex.Model), Shortcut = "+", Disabled = false, OnClick = function()
+		rightClickContext:Hide()
+		task.defer(function()
+			f.showInsertMenu(mouse.X + 8, mouse.Y + 8, selection.List[1])
 		end)
 	end})
 	
@@ -2184,6 +2308,11 @@ end
 
 function f.newExplorer()
 	local newgui = getResource("ExplorerPanel")
+	newgui.Name = "ExplorerPanel"
+	newgui:SetAttribute("DefaultPane", "Left")
+	newgui:SetAttribute("FloatWidth", 340)
+	newgui:SetAttribute("FloatHeight", 430)
+	ensureFlatButton(newgui.TopBar, "AddButton", "+", 24)
 	f.applyWindowTheme(newgui, BrandConfig.Theme.AccentOrange)
 	local explorerScroll = ScrollBar.new()
 	local explorerScrollH = ScrollBar.new(true)
@@ -2228,6 +2357,7 @@ function f.newExplorer()
 			self:Refresh()
 			propertiesTree:TreeUpdate()
 			propertiesTree:Refresh()
+			f.syncScriptViewerSelection()
 		end)
 		entry.MouseButton2Down:Connect(function()
 			local node = self.Tree[i + self.Index]
@@ -2237,6 +2367,7 @@ function f.newExplorer()
 				self.Selection:Set({node.Obj})
 			end
 			self:Refresh()
+			f.syncScriptViewerSelection()
 		end)
 		entry.MouseButton2Up:Connect(function()
 			if rightEntry and f.checkMouseInGui(rightEntry) then
@@ -2320,29 +2451,32 @@ function f.newExplorer()
 	end
 	
 	explorerScroll.Gui.Parent = newgui.Content
-	explorerScroll:Texture({
-		FrameColor = BrandConfig.Theme.PanelRaised,
-		ThumbColor = BrandConfig.Theme.AccentOrangeDeep,
-		ThumbSelectColor = BrandConfig.Theme.AccentOrange,
-		ButtonColor = BrandConfig.Theme.SurfaceAlt,
-		ArrowColor = BrandConfig.Theme.Text
-	})
+	scrollThemeCallbacks.ExplorerScroll = function()
+		explorerScroll:Texture({
+			FrameColor = BrandConfig.Theme.PanelRaised,
+			ThumbColor = BrandConfig.Theme.AccentOrangeDeep,
+			ThumbSelectColor = BrandConfig.Theme.AccentOrange,
+			ButtonColor = BrandConfig.Theme.SurfaceAlt,
+			ArrowColor = BrandConfig.Theme.Text
+		})
+		explorerScrollH:Texture({
+			FrameColor = BrandConfig.Theme.PanelRaised,
+			ThumbColor = BrandConfig.Theme.AccentOrangeDeep,
+			ThumbSelectColor = BrandConfig.Theme.AccentOrange,
+			ButtonColor = BrandConfig.Theme.SurfaceAlt,
+			ArrowColor = BrandConfig.Theme.Text
+		})
+	end
+	scrollThemeCallbacks.ExplorerScroll()
 	explorerScroll:SetScrollFrame(newgui.Content,3)
 	
 	explorerScrollH.Gui.Visible = false
 	explorerScrollH.Gui.Parent = newgui.Content
-	explorerScrollH:Texture({
-		FrameColor = BrandConfig.Theme.PanelRaised,
-		ThumbColor = BrandConfig.Theme.AccentOrangeDeep,
-		ThumbSelectColor = BrandConfig.Theme.AccentOrange,
-		ButtonColor = BrandConfig.Theme.SurfaceAlt,
-		ArrowColor = BrandConfig.Theme.Text
-	})
 	explorerScrollH.Gui.Position = UDim2.new(0,0,1,-16)
 	explorerScrollH.Gui.Size = UDim2.new(1,-16,0,16)
 	
 	newTree.OnUpdate = function(self)
-		local guiX = explorerPanel.Content.AbsoluteSize.X-16
+		local guiX = newgui.Content.AbsoluteSize.X-16
 		explorerScrollH.VisibleSpace = guiX
 		explorerScrollH.TotalSpace = nodeWidth+10
 		if nodeWidth > guiX then
@@ -2371,6 +2505,9 @@ function f.newExplorer()
 	f.hookWindowListener(newgui)
 	newgui.TopBar.Settings.MouseButton1Click:Connect(function()
 		f.showPanelMenu(newgui)
+	end)
+	newgui.TopBar.AddButton.MouseButton1Click:Connect(function()
+		f.showInsertMenu(newgui.TopBar.AddButton.AbsolutePosition.X, newgui.TopBar.AddButton.AbsolutePosition.Y + newgui.TopBar.AddButton.AbsoluteSize.Y + 2)
 	end)
 	newgui.Changed:Connect(function(prop) if prop == "AbsoluteSize" or prop == "AbsolutePosition" then newTree:Refresh() end end)
 	
@@ -2892,19 +3029,39 @@ local function styleText(guiObject, font, size, color)
 end
 
 local function bindHover(button, idleColor, hoverColor, idleTransparency, hoverTransparency)
-	if not button or hoverBindings[button] then return end
-	hoverBindings[button] = true
+	if not button then return end
+	if not hoverBindings[button] then
+		hoverBindings[button] = {
+			Hovered = false
+		}
+		button.MouseEnter:Connect(function()
+			local binding = hoverBindings[button]
+			if not binding then return end
+			binding.Hovered = true
+			button.BackgroundColor3 = binding.HoverColor or binding.IdleColor
+			button.BackgroundTransparency = binding.HoverTransparency or 0
+		end)
+		button.MouseLeave:Connect(function()
+			local binding = hoverBindings[button]
+			if not binding then return end
+			binding.Hovered = false
+			button.BackgroundColor3 = binding.IdleColor
+			button.BackgroundTransparency = binding.IdleTransparency or 0
+		end)
+	end
+	local binding = hoverBindings[button]
+	binding.IdleColor = idleColor
+	binding.HoverColor = hoverColor or idleColor
+	binding.IdleTransparency = idleTransparency or 0
+	binding.HoverTransparency = hoverTransparency or 0
 	button.AutoButtonColor = false
-	button.BackgroundColor3 = idleColor
-	button.BackgroundTransparency = idleTransparency or 0
-	button.MouseEnter:Connect(function()
-		button.BackgroundColor3 = hoverColor or idleColor
-		button.BackgroundTransparency = hoverTransparency or 0
-	end)
-	button.MouseLeave:Connect(function()
-		button.BackgroundColor3 = idleColor
-		button.BackgroundTransparency = idleTransparency or 0
-	end)
+	if binding.Hovered then
+		button.BackgroundColor3 = binding.HoverColor
+		button.BackgroundTransparency = binding.HoverTransparency
+	else
+		button.BackgroundColor3 = binding.IdleColor
+		button.BackgroundTransparency = binding.IdleTransparency
+	end
 end
 
 local function styleSearchFrame(searchFrame, accentColor)
@@ -2958,6 +3115,192 @@ function f.styleContextMenu(menu)
 	end
 end
 
+local function destroyHandleBucket(bucket)
+	for key,value in pairs(bucket) do
+		if typeof(value) == "Instance" then
+			value:Destroy()
+		elseif type(value) == "table" then
+			destroyHandleBucket(value)
+		end
+		bucket[key] = nil
+	end
+end
+
+local function beginMouseDrag(onMove, onRelease)
+	local user = Services.UserInputService
+	local moveConnection
+	local endConnection
+	moveConnection = user.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			onMove()
+		end
+	end)
+	endConnection = user.InputEnded:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+		if moveConnection then
+			moveConnection:Disconnect()
+		end
+		if endConnection then
+			endConnection:Disconnect()
+		end
+		if onRelease then
+			onRelease()
+		end
+	end)
+end
+
+function f.getWindowAccent(window)
+	if not window then
+		return BrandConfig.Theme.AccentOrange
+	end
+	local accentKey = window:GetAttribute("AccentKey")
+	return BrandConfig.Theme[accentKey or "AccentOrange"] or BrandConfig.Theme.AccentOrange
+end
+
+function f.refreshWindowTheme(window)
+	if not window then return end
+	f.applyWindowTheme(window, f.getWindowAccent(window))
+end
+
+function f.refreshAllWindowThemes()
+	for _,window in pairs(activeWindows) do
+		f.refreshWindowTheme(window)
+	end
+	for _,callback in pairs(scrollThemeCallbacks) do
+		callback()
+	end
+end
+
+function f.rebuildPaneHandles()
+	local theme = BrandConfig.Theme
+	destroyHandleBucket(paneSplitHandles)
+	destroyHandleBucket(paneWidthHandles)
+	if uiMinimized then
+		return
+	end
+	local paneDefinitions = {
+		Left = {
+			Container = contentL,
+			Items = LPaneItems,
+			Width = explorerSettings.LPaneWidth,
+			WidthGetter = function()
+				return explorerSettings.LPaneWidth
+			end,
+			WidthSetter = function(value)
+				explorerSettings.LPaneWidth = value
+			end,
+			HandlePosition = function(width)
+				return UDim2.new(0,width - 3,0,58)
+			end,
+			ResizeFormula = function(startWidth, startMouseX)
+				return startWidth + (mouse.X - startMouseX)
+			end
+		},
+		Right = {
+			Container = contentR,
+			Items = RPaneItems,
+			Width = explorerSettings.RPaneWidth,
+			WidthGetter = function()
+				return explorerSettings.RPaneWidth
+			end,
+			WidthSetter = function(value)
+				explorerSettings.RPaneWidth = value
+			end,
+			HandlePosition = function(width)
+				return UDim2.new(1,-width - 3,0,58)
+			end,
+			ResizeFormula = function(startWidth, startMouseX)
+				return startWidth - (mouse.X - startMouseX)
+			end
+		}
+	}
+
+	for paneName,data in pairs(paneDefinitions) do
+		if #data.Items > 0 then
+			local widthHandle = CreateInstance("Frame",{
+				Name = paneName.."PaneResize",
+				Active = true,
+				BackgroundColor3 = theme.PanelRaised,
+				BackgroundTransparency = 0.15,
+				BorderSizePixel = 0,
+				Position = data.HandlePosition(data.WidthGetter()),
+				Size = UDim2.new(0,6,1,-74),
+				Visible = true,
+				ZIndex = 4,
+				Parent = gui
+			})
+			ensureUICorner(widthHandle, BrandConfig.Radii.Small)
+			ensureUIStroke(widthHandle, "ThemeStroke", theme.StrokeSoft, 0.05, 1)
+			local grip = CreateInstance("TextLabel",{
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1,0,1,0),
+				Text = paneName == "Left" and "||>" or "<||",
+				ZIndex = 5,
+				Parent = widthHandle
+			})
+			styleText(grip, BrandConfig.Fonts.Mono, 12, theme.TextMuted)
+			widthHandle.InputBegan:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+				local startWidth = data.WidthGetter()
+				local startMouseX = mouse.X
+				beginMouseDrag(function()
+					local maxWidth = math.max(260, math.floor(gui.AbsoluteSize.X * 0.55))
+					local newWidth = math.clamp(math.floor(data.ResizeFormula(startWidth, startMouseX)), 220, maxWidth)
+					data.WidthSetter(newWidth)
+					f.buildPanes(true)
+					f.refreshSettingsValues()
+				end)
+			end)
+			paneWidthHandles[paneName] = widthHandle
+		end
+
+		if #data.Items > 1 then
+			paneSplitHandles[paneName] = {}
+			for index = 1,#data.Items - 1 do
+				local splitY = f.prevProportions(data.Items, index)
+				local splitHandle = CreateInstance("Frame",{
+					Name = paneName.."PaneSplit"..index,
+					Active = true,
+					BackgroundColor3 = theme.PanelRaised,
+					BackgroundTransparency = 0.08,
+					BorderSizePixel = 0,
+					Position = UDim2.new(0,0,splitY,-3),
+					Size = UDim2.new(0,data.WidthGetter(),0,6),
+					ZIndex = 4,
+					Parent = data.Container
+				})
+				ensureUICorner(splitHandle, BrandConfig.Radii.Small)
+				ensureUIStroke(splitHandle, "ThemeStroke", theme.StrokeSoft, 0.05, 1)
+				local splitLine = CreateInstance("Frame",{
+					AnchorPoint = Vector2.new(0,0.5),
+					BackgroundColor3 = theme.AccentBlue,
+					BorderSizePixel = 0,
+					Position = UDim2.new(0,12,0.5,0),
+					Size = UDim2.new(1,-24,0,1),
+					ZIndex = 5,
+					Parent = splitHandle
+				})
+				local accent = paneName == "Left" and theme.AccentOrange or theme.AccentBlue
+				splitLine.BackgroundColor3 = accent
+				splitHandle.InputBegan:Connect(function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+					beginMouseDrag(function()
+						local containerHeight = math.max(data.Container.AbsoluteSize.Y, 1)
+						local totalPair = data.Items[index].Proportion + data.Items[index + 1].Proportion
+						local previousHeight = f.prevProportions(data.Items, index - 1)
+						local relative = math.clamp((mouse.Y - data.Container.AbsolutePosition.Y) / containerHeight, 0, 1)
+						local topSize = math.clamp(relative - previousHeight, 0.16, totalPair - 0.16)
+						data.Items[index].Proportion = topSize
+						data.Items[index + 1].Proportion = totalPair - topSize
+						f.buildPanes(true)
+					end)
+				end)
+				table.insert(paneSplitHandles[paneName], splitHandle)
+			end
+		end
+	end
+end
+
 local function buildDockHints()
 	if dockHints.Left and dockHints.Right then return end
 	local theme = BrandConfig.Theme
@@ -2999,7 +3342,7 @@ function f.updateDockHints()
 	local theme = BrandConfig.Theme
 	for paneName,hint in pairs(dockHints) do
 		local active = mouseWindow ~= nil and setPane == paneName
-		hint.Visible = mouseWindow ~= nil
+		hint.Visible = mouseWindow ~= nil and not uiMinimized
 		hint.BackgroundColor3 = active and theme.DockHint or theme.DockIdle
 		hint.BackgroundTransparency = active and 0.2 or 0.55
 		if hint:FindFirstChild("Label") then
@@ -3013,7 +3356,9 @@ function f.restoreWindow(window)
 	if not window then return end
 	window.Visible = true
 	window.Parent = window.Parent or gui
-	window.Size = UDim2.new(0,300,0,420)
+	local floatWidth = window:GetAttribute("FloatWidth") or 320
+	local floatHeight = window:GetAttribute("FloatHeight") or 420
+	window.Size = UDim2.new(0,floatWidth,0,floatHeight)
 	if window:FindFirstChild("Content") then
 		window.Content.Size = UDim2.new(1,-2,1,-50)
 	end
@@ -3197,40 +3542,116 @@ function f.hideOverlay()
 	end)
 end
 
+local function ensureFlatButton(parent, name, text, width)
+	local button = parent:FindFirstChild(name)
+	if not button then
+		button = CreateInstance("TextButton",{
+			Name = name,
+			Active = true,
+			AutoButtonColor = false,
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Size = UDim2.new(0,width or 26,0,20),
+			Text = text or "",
+			ZIndex = parent.ZIndex + 1,
+			Parent = parent
+		})
+	end
+	button.Text = text or button.Text
+	button.Size = UDim2.new(0,width or button.Size.X.Offset,0,20)
+	return button
+end
+
 function f.applyWindowTheme(window, accentColor)
 	if not window then return end
 	local theme = BrandConfig.Theme
 	local accent = accentColor or theme.AccentOrange
+	window:SetAttribute("AccentKey", accent == theme.AccentBlue and "AccentBlue" or "AccentOrange")
 	window.BackgroundColor3 = theme.Panel
 	window.BorderSizePixel = 0
 	ensureUICorner(window, BrandConfig.Radii.Medium)
 	ensureUIStroke(window, "ThemeStroke", theme.Stroke, 0.08, 1.25)
 	window.TopBar.BackgroundColor3 = theme.PanelRaised
 	window.TopBar.BorderSizePixel = 0
+	window.TopBar.Size = UDim2.new(1,0,0,50)
 	if window:FindFirstChild("Content") then
+		window.Content.Position = UDim2.new(0,1,0,50)
+		window.Content.Size = UDim2.new(1,-2,1,-50)
 		window.Content.BackgroundColor3 = theme.PanelAlt
 		window.Content.BorderSizePixel = 0
 		ensureUICorner(window.Content, BrandConfig.Radii.Medium)
 		if window.Content:FindFirstChild("List") then
 			window.Content.List.BackgroundColor3 = theme.Field
+			window.Content.List.BorderSizePixel = 0
 		end
 	end
 	if window.TopBar:FindFirstChild("WindowTitle") then
+		window.TopBar.WindowTitle.Position = UDim2.new(0,10,0,5)
+		window.TopBar.WindowTitle.Size = UDim2.new(1,-88,0,18)
+		window.TopBar.WindowTitle.TextXAlignment = Enum.TextXAlignment.Left
 		styleText(window.TopBar.WindowTitle, BrandConfig.Fonts.Heading, 15, theme.Text)
 	end
 	if window.TopBar:FindFirstChild("Close") then
+		window.TopBar.Close.Position = UDim2.new(1,-30,0,4)
+		window.TopBar.Close.Size = UDim2.new(0,26,0,20)
+		window.TopBar.Close.Text = "X"
 		styleText(window.TopBar.Close, BrandConfig.Fonts.Heading, 14, theme.Text)
 		bindHover(window.TopBar.Close, theme.PanelRaised, theme.Danger, 1, 0.1)
 	end
 	if window.TopBar:FindFirstChild("Settings") then
+		window.TopBar.Settings.Position = UDim2.new(1,-58,0,4)
+		window.TopBar.Settings.Size = UDim2.new(0,24,0,20)
 		window.TopBar.Settings.BorderSizePixel = 0
 		bindHover(window.TopBar.Settings, theme.PanelRaised, accent, 1, 0.12)
 		if window.TopBar.Settings:FindFirstChild("ImageLabel") then
+			window.TopBar.Settings.ImageLabel.Position = UDim2.new(0.5,-7,0.5,-7)
+			window.TopBar.Settings.ImageLabel.Size = UDim2.new(0,14,0,14)
 			window.TopBar.Settings.ImageLabel.ImageColor3 = accent
 		end
 	end
+	if window.TopBar:FindFirstChild("AddButton") then
+		window.TopBar.AddButton.Position = UDim2.new(1,-86,0,4)
+		window.TopBar.AddButton.Size = UDim2.new(0,24,0,20)
+		window.TopBar.AddButton.BorderSizePixel = 0
+		styleText(window.TopBar.AddButton, BrandConfig.Fonts.Heading, 16, accent)
+		bindHover(window.TopBar.AddButton, theme.PanelRaised, accent, 1, 0.12)
+		if window.TopBar:FindFirstChild("WindowTitle") then
+			window.TopBar.WindowTitle.Size = UDim2.new(1,-114,0,18)
+		end
+	end
 	if window.TopBar:FindFirstChild("SearchFrame") then
+		window.TopBar.SearchFrame.Position = UDim2.new(0,3,0,47)
+		window.TopBar.SearchFrame.Size = UDim2.new(1,-6,0,2)
 		styleSearchFrame(window.TopBar.SearchFrame, accent)
+	end
+	local resizeHandle = window:FindFirstChild("ResizeHandle")
+	if not resizeHandle then
+		resizeHandle = CreateInstance("Frame",{
+			Name = "ResizeHandle",
+			Active = true,
+			AnchorPoint = Vector2.new(1,1),
+			BackgroundColor3 = theme.PanelRaised,
+			BorderSizePixel = 0,
+			Position = UDim2.new(1,-3,1,-3),
+			Size = UDim2.new(0,14,0,14),
+			ZIndex = 3,
+			Parent = window
+		})
+		local grip = CreateInstance("TextLabel",{
+			Name = "Grip",
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1,0,1,0),
+			Text = "//",
+			ZIndex = 4,
+			Parent = resizeHandle
+		})
+		styleText(grip, BrandConfig.Fonts.Mono, 10, accent)
+	end
+	resizeHandle.BackgroundColor3 = theme.PanelRaised
+	ensureUICorner(resizeHandle, BrandConfig.Radii.Small)
+	ensureUIStroke(resizeHandle, "ThemeStroke", theme.StrokeSoft, 0.08, 1)
+	if resizeHandle:FindFirstChild("Grip") then
+		styleText(resizeHandle.Grip, BrandConfig.Fonts.Mono, 10, accent)
 	end
 end
 
@@ -3245,39 +3666,40 @@ function f.applyBaseTheme()
 	topMenu.Visible = true
 	topMenu.BackgroundColor3 = theme.Shell
 	topMenu.BorderSizePixel = 0
-	topMenu.Position = UDim2.new(0.5,-210,0,12)
-	topMenu.Size = UDim2.new(0,420,0,44)
+	topMenu.Position = UDim2.new(0.5,-320,0,12)
+	topMenu.Size = UDim2.new(0,640,0,44)
 	ensureUICorner(topMenu, BrandConfig.Radii.Large)
 	ensureUIStroke(topMenu, "ThemeStroke", theme.Stroke, 0.1, 1.25)
 	ensureUIGradient(topMenu, "ThemeGradient", {
 		ColorSequenceKeypoint.new(0, theme.Surface),
 		ColorSequenceKeypoint.new(1, theme.Shell)
 	}, 0)
-	topMenuContent.BackgroundColor3 = theme.PanelAlt
-	topMenuContent.BackgroundTransparency = 0.55
-	topMenuContent.BorderSizePixel = 0
-	topMenuContent.Position = UDim2.new(0,118,0,4)
-	topMenuContent.Size = UDim2.new(1,-164,1,-8)
-	ensureUICorner(topMenuContent, BrandConfig.Radii.Medium)
+	topMenuContent.Visible = false
 	topMenuTitle.Text = BrandConfig.Name
 	topMenuTitle.TextXAlignment = Enum.TextXAlignment.Left
 	topMenuTitle.Position = UDim2.new(0,14,0,5)
-	topMenuTitle.Size = UDim2.new(0,96,0,18)
+	topMenuTitle.Size = UDim2.new(0,104,0,18)
 	styleText(topMenuTitle, BrandConfig.Fonts.Title, 16, theme.Text)
 	topMenuVersion.Text = BrandConfig.Version
 	topMenuVersion.TextXAlignment = Enum.TextXAlignment.Left
 	topMenuVersion.Position = UDim2.new(0,14,0,23)
-	topMenuVersion.Size = UDim2.new(0,96,0,14)
+	topMenuVersion.Size = UDim2.new(0,104,0,14)
 	styleText(topMenuVersion, BrandConfig.Fonts.Mono, 12, theme.TextSoft)
 	for _,child in pairs(topMenu:GetChildren()) do
 		if child.Name == "Slant" then
 			child.Visible = false
 		end
 	end
+	topMenuSettingsButton = topMenuSettingsButton or ensureFlatButton(topMenu, "ThemeButton", "UI", 42)
+	topMenuScriptButton = topMenuScriptButton or ensureFlatButton(topMenu, "ScriptButton", "Code", 54)
+	topMenuConsoleButton = topMenuConsoleButton or ensureFlatButton(topMenu, "ConsoleButton", ">_", 42)
+	topMenuSaveButton = topMenuSaveButton or ensureFlatButton(topMenu, "SaveButton", "Save", 54)
+	topMenuMinimizeButton = topMenuMinimizeButton or ensureFlatButton(topMenu, "MinimizeButton", "_", 36)
+	topMenuCloseButton = topMenuCloseButton or ensureFlatButton(topMenu, "CloseButton", "X", 36)
 	topMenuViewButton.BackgroundColor3 = theme.PanelAlt
 	topMenuViewButton.BorderSizePixel = 0
 	topMenuViewButton.Position = UDim2.new(0,118,0,4)
-	topMenuViewButton.Size = UDim2.new(1,-164,0,36)
+	topMenuViewButton.Size = UDim2.new(0,184,0,36)
 	ensureUICorner(topMenuViewButton, BrandConfig.Radii.Medium)
 	ensureUIStroke(topMenuViewButton, "ThemeStroke", theme.StrokeSoft, 0.1, 1)
 	bindHover(topMenuViewButton, theme.PanelAlt, theme.SurfaceAlt, 0, 0)
@@ -3293,7 +3715,7 @@ function f.applyBaseTheme()
 	styleText(topMenuViewArrow, BrandConfig.Fonts.Heading, 16, theme.AccentBlue)
 	topMenuAboutButton.BackgroundColor3 = theme.PanelAlt
 	topMenuAboutButton.BorderSizePixel = 0
-	topMenuAboutButton.Position = UDim2.new(1,-40,0,4)
+	topMenuAboutButton.Position = UDim2.new(1,-120,0,4)
 	topMenuAboutButton.Size = UDim2.new(0,36,0,36)
 	topMenuAboutButton.Text = "i"
 	ensureUICorner(topMenuAboutButton, BrandConfig.Radii.Medium)
@@ -3301,6 +3723,61 @@ function f.applyBaseTheme()
 	styleText(topMenuAboutButton, BrandConfig.Fonts.Title, 18, theme.AccentOrange)
 	bindHover(topMenuAboutButton, theme.PanelAlt, theme.SurfaceAlt, 0, 0)
 	topMenuAboutIcon.Visible = false
+	topMenuSaveButton.Position = UDim2.new(1,-332,0,4)
+	topMenuSaveButton.BackgroundColor3 = theme.PanelAlt
+	topMenuSaveButton.BorderSizePixel = 0
+	ensureUICorner(topMenuSaveButton, BrandConfig.Radii.Medium)
+	ensureUIStroke(topMenuSaveButton, "ThemeStroke", theme.StrokeSoft, 0.1, 1)
+	styleText(topMenuSaveButton, BrandConfig.Fonts.Heading, 13, theme.AccentOrange)
+	bindHover(topMenuSaveButton, theme.PanelAlt, theme.SurfaceAlt, 0, 0)
+	
+	topMenuConsoleButton.Position = UDim2.new(1,-274,0,4)
+	topMenuConsoleButton.BackgroundColor3 = theme.PanelAlt
+	topMenuConsoleButton.BorderSizePixel = 0
+	ensureUICorner(topMenuConsoleButton, BrandConfig.Radii.Medium)
+	ensureUIStroke(topMenuConsoleButton, "ThemeStroke", theme.StrokeSoft, 0.1, 1)
+	styleText(topMenuConsoleButton, BrandConfig.Fonts.Heading, 13, theme.AccentBlue)
+	bindHover(topMenuConsoleButton, theme.PanelAlt, theme.SurfaceAlt, 0, 0)
+
+	topMenuSettingsButton.Position = UDim2.new(1,-224,0,4)
+	topMenuSettingsButton.BackgroundColor3 = theme.PanelAlt
+	topMenuSettingsButton.BorderSizePixel = 0
+	ensureUICorner(topMenuSettingsButton, BrandConfig.Radii.Medium)
+	ensureUIStroke(topMenuSettingsButton, "ThemeStroke", theme.StrokeSoft, 0.1, 1)
+	styleText(topMenuSettingsButton, BrandConfig.Fonts.Heading, 13, theme.AccentOrange)
+	bindHover(topMenuSettingsButton, theme.PanelAlt, theme.SurfaceAlt, 0, 0)
+	topMenuScriptButton.Position = UDim2.new(1,-178,0,4)
+	topMenuScriptButton.BackgroundColor3 = theme.PanelAlt
+	topMenuScriptButton.BorderSizePixel = 0
+	ensureUICorner(topMenuScriptButton, BrandConfig.Radii.Medium)
+	ensureUIStroke(topMenuScriptButton, "ThemeStroke", theme.StrokeSoft, 0.1, 1)
+	styleText(topMenuScriptButton, BrandConfig.Fonts.Heading, 13, theme.AccentBlue)
+	bindHover(topMenuScriptButton, theme.PanelAlt, theme.SurfaceAlt, 0, 0)
+	topMenuMinimizeButton.Position = UDim2.new(1,-80,0,4)
+	topMenuMinimizeButton.Text = uiMinimized and "^" or "_"
+	topMenuMinimizeButton.BackgroundColor3 = theme.PanelAlt
+	topMenuMinimizeButton.BorderSizePixel = 0
+	ensureUICorner(topMenuMinimizeButton, BrandConfig.Radii.Medium)
+	ensureUIStroke(topMenuMinimizeButton, "ThemeStroke", theme.StrokeSoft, 0.1, 1)
+	styleText(topMenuMinimizeButton, BrandConfig.Fonts.Heading, 16, theme.TextSoft)
+	bindHover(topMenuMinimizeButton, theme.PanelAlt, theme.SurfaceAlt, 0, 0)
+	topMenuCloseButton.Position = UDim2.new(1,-40,0,4)
+	topMenuCloseButton.BackgroundColor3 = theme.PanelAlt
+	topMenuCloseButton.BorderSizePixel = 0
+	ensureUICorner(topMenuCloseButton, BrandConfig.Radii.Medium)
+	ensureUIStroke(topMenuCloseButton, "ThemeStroke", theme.StrokeSoft, 0.1, 1)
+	styleText(topMenuCloseButton, BrandConfig.Fonts.Heading, 15, theme.Danger)
+	bindHover(topMenuCloseButton, theme.PanelAlt, theme.Danger, 0, 0.15)
+	for _,hint in pairs(dockHints) do
+		if hint then
+			hint.BackgroundColor3 = theme.DockIdle
+			ensureUICorner(hint, BrandConfig.Radii.Medium)
+			ensureUIStroke(hint, "ThemeStroke", theme.Stroke, 0.2, 1)
+			if hint:FindFirstChild("Label") then
+				styleText(hint.Label, BrandConfig.Fonts.Heading, 14, theme.TextMuted)
+			end
+		end
+	end
 	local entryTemplateRef = resources:FindFirstChild("Entry")
 	if entryTemplateRef then
 		entryTemplateRef.BackgroundColor3 = theme.SelectionAlt
@@ -3345,6 +3822,366 @@ function f.applyBaseTheme()
 	end
 end
 
+function f.getDefaultPane(window)
+	if not window then return "Right" end
+	local pane = window:GetAttribute("DefaultPane")
+	if pane == "Left" or pane == "Right" or pane == "Floating" then
+		return pane
+	end
+	return "Right"
+end
+
+function f.showWindow(window, preferredPane)
+	if not window then return end
+	if uiMinimized then
+		f.toggleUiMinimized(false)
+	end
+	local targetPane = preferredPane or f.getDefaultPane(window)
+	window.Visible = true
+	if targetPane == "Floating" then
+		f.floatWindow(window)
+	elseif not f.checkInPane(window) then
+		f.addToPane(window, targetPane)
+	else
+		f.buildPanes(true)
+	end
+	if window:FindFirstChild("ResizeHandle") then
+		window.ResizeHandle.Visible = not f.checkInPane(window)
+	end
+end
+
+function f.toggleWindow(window, preferredPane)
+	if not window then return end
+	if window.Visible then
+		f.detachWindow(window)
+		window.Visible = false
+		f.buildPanes(true)
+	else
+		f.showWindow(window, preferredPane)
+	end
+end
+
+function f.toggleUiMinimized(forceValue)
+	local nextValue = forceValue
+	if nextValue == nil then
+		nextValue = not uiMinimized
+	end
+	if uiMinimized == nextValue then
+		return
+	end
+	uiMinimized = nextValue
+	if uiMinimized then
+		minimizedWindows = {}
+		for _,window in pairs(activeWindows) do
+			minimizedWindows[window] = window.Visible
+			if not f.checkInPane(window) then
+				window.Visible = false
+			end
+		end
+		contentL.Visible = false
+		contentR.Visible = false
+	else
+		for window,wasVisible in pairs(minimizedWindows) do
+			if window and window.Parent then
+				window.Visible = wasVisible and true or false
+			end
+		end
+		minimizedWindows = {}
+		f.buildPanes(true)
+	end
+	mouseWindow = nil
+	if topMenuMinimizeButton then
+		topMenuMinimizeButton.Text = uiMinimized and "^" or "_"
+	end
+	f.updateDockHints()
+end
+
+function f.refreshDataPanels(rebuildExplorer)
+	if explorerTree then
+		if rebuildExplorer then
+			explorerTree:TreeUpdate()
+		end
+		explorerTree:Refresh()
+	end
+	if propertiesTree then
+		propertiesTree:TreeUpdate()
+		propertiesTree:Refresh()
+	end
+	f.syncScriptViewerSelection()
+end
+
+function f.deleteSelection()
+	if not explorerTree or not explorerTree.Selection or #explorerTree.Selection.List == 0 then
+		return false
+	end
+	local selection = explorerTree.Selection.List
+	explorerTree.Selection:Set({})
+	for _,obj in pairs(selection) do
+		pcall(function()
+			obj:Destroy()
+		end)
+	end
+	if rightClickContext then
+		rightClickContext:Hide()
+	end
+	f.refreshDataPanels(true)
+	return true
+end
+
+local function parseRgbTriplet(text, fallback)
+	local values = {}
+	for number in string.gmatch(text or "", "%d+") do
+		table.insert(values, tonumber(number))
+	end
+	if #values < 3 then
+		return fallback
+	end
+	return Color3.fromRGB(
+		math.clamp(values[1], 0, 255),
+		math.clamp(values[2], 0, 255),
+		math.clamp(values[3], 0, 255)
+	)
+end
+
+local function darkenColor(color, amount)
+	local r = math.max(0, math.floor(color.R * 255) - amount)
+	local g = math.max(0, math.floor(color.G * 255) - amount)
+	local b = math.max(0, math.floor(color.B * 255) - amount)
+	return Color3.fromRGB(r,g,b)
+end
+
+function f.refreshSettingsValues()
+	if not settingsPanel or not settingsPanelState.Fields then return end
+	local fields = settingsPanelState.Fields
+	if fields.LeftWidth then
+		fields.LeftWidth.Text = tostring(explorerSettings.LPaneWidth)
+	end
+	if fields.RightWidth then
+		fields.RightWidth.Text = tostring(explorerSettings.RPaneWidth)
+	end
+	if fields.CornerRadius then
+		fields.CornerRadius.Text = tostring(BrandConfig.Radii.Medium)
+	end
+	if fields.OrangeRGB then
+		local orange = BrandConfig.Theme.AccentOrange
+		fields.OrangeRGB.Text = string.format("%d,%d,%d", math.floor(orange.R * 255), math.floor(orange.G * 255), math.floor(orange.B * 255))
+	end
+	if fields.BlueRGB then
+		local blue = BrandConfig.Theme.AccentBlue
+		fields.BlueRGB.Text = string.format("%d,%d,%d", math.floor(blue.R * 255), math.floor(blue.G * 255), math.floor(blue.B * 255))
+	end
+end
+
+function f.setSettingsStatus(text, color)
+	if settingsPanelState.Status then
+		settingsPanelState.Status.Text = text or ""
+		settingsPanelState.Status.TextColor3 = color or BrandConfig.Theme.TextSoft
+	end
+end
+
+function f.applyCustomizationSettings()
+	local fields = settingsPanelState.Fields
+	if not fields then return end
+	local leftWidth = tonumber(fields.LeftWidth and fields.LeftWidth.Text or "") or explorerSettings.LPaneWidth
+	local rightWidth = tonumber(fields.RightWidth and fields.RightWidth.Text or "") or explorerSettings.RPaneWidth
+	local mediumRadius = tonumber(fields.CornerRadius and fields.CornerRadius.Text or "") or BrandConfig.Radii.Medium
+	explorerSettings.LPaneWidth = math.clamp(math.floor(leftWidth), 220, math.max(260, math.floor(gui.AbsoluteSize.X * 0.55)))
+	explorerSettings.RPaneWidth = math.clamp(math.floor(rightWidth), 220, math.max(260, math.floor(gui.AbsoluteSize.X * 0.55)))
+	BrandConfig.Radii.Medium = math.clamp(math.floor(mediumRadius), 6, 20)
+	BrandConfig.Radii.Small = math.max(4, BrandConfig.Radii.Medium - 4)
+	BrandConfig.Radii.Large = BrandConfig.Radii.Medium + 4
+	BrandConfig.Theme.AccentOrange = parseRgbTriplet(fields.OrangeRGB and fields.OrangeRGB.Text, BrandConfig.Theme.AccentOrange)
+	BrandConfig.Theme.AccentBlue = parseRgbTriplet(fields.BlueRGB and fields.BlueRGB.Text, BrandConfig.Theme.AccentBlue)
+	BrandConfig.Theme.AccentOrangeDeep = darkenColor(BrandConfig.Theme.AccentOrange, 44)
+	BrandConfig.Theme.AccentBlueDeep = darkenColor(BrandConfig.Theme.AccentBlue, 54)
+	BrandConfig.Theme.Selection = BrandConfig.Theme.AccentOrange
+	BrandConfig.Theme.SelectionAlt = BrandConfig.Theme.AccentBlue
+	BrandConfig.Theme.DockHint = BrandConfig.Theme.AccentOrange
+	f.applyBaseTheme()
+	f.refreshAllWindowThemes()
+	f.refreshSettingsValues()
+	f.buildPanes(true)
+	f.updateDockHints()
+	f.refreshDataPanels(true)
+	f.setSettingsStatus("Theme updated.", BrandConfig.Theme.Success)
+end
+
+function f.resetCustomizationSettings()
+	explorerSettings.LPaneWidth = DefaultExplorerSettings.LPaneWidth
+	explorerSettings.RPaneWidth = DefaultExplorerSettings.RPaneWidth
+	for key,value in pairs(DefaultTheme) do
+		BrandConfig.Theme[key] = value
+	end
+	for key,value in pairs(DefaultRadii) do
+		BrandConfig.Radii[key] = value
+	end
+	f.applyBaseTheme()
+	f.refreshAllWindowThemes()
+	f.refreshSettingsValues()
+	f.buildPanes(true)
+	f.updateDockHints()
+	f.refreshDataPanels(true)
+	f.setSettingsStatus("Theme reset to defaults.", BrandConfig.Theme.TextSoft)
+end
+
+function f.getInsertParent(target)
+	local parent = target or f.getPrimarySelection() or workspace
+	if parent == game then
+		return workspace
+	end
+	return parent
+end
+
+function f.insertObject(className, parentObj)
+	local targetParent = f.getInsertParent(parentObj)
+	local ok, created = pcall(function()
+		local newObject = Instance.new(className)
+		newObject.Name = className
+		if newObject:IsA("BasePart") then
+			newObject.Anchored = true
+			local root = f.getCharacterRoot(Services.Players.LocalPlayer.Character)
+			if root then
+				newObject.CFrame = root.CFrame * CFrame.new(0, 0, -6)
+			end
+		elseif newObject:IsA("Script") or newObject:IsA("LocalScript") then
+			pcall(function()
+				newObject.Source = "-- "..BrandConfig.Name.." script\n"
+			end)
+		elseif newObject:IsA("ModuleScript") then
+			pcall(function()
+				newObject.Source = "return {}\n"
+			end)
+		end
+		newObject.Parent = targetParent
+		return newObject
+	end)
+	if not ok or not created then
+		return nil, created
+	end
+	f.addObject(created, true)
+	f.refreshDataPanels(true)
+	f.focusObject(created)
+	return created
+end
+
+function f.showInsertMenu(x, y, parentObj)
+	insertContext = insertContext or ContextMenu.new()
+	insertContext:Clear()
+	local targetParent = f.getInsertParent(parentObj)
+	insertContext:Add({
+		Name = "Insert into "..targetParent.Name,
+		Shortcut = "",
+		Disabled = true,
+		OnClick = function() end
+	})
+	insertContext:AddDivider()
+	for _,item in ipairs(InsertableClasses) do
+		insertContext:Add({
+			Name = item.Name,
+			Icon = f.icon(nil, iconIndex[item.ClassName] or iconIndex.Model or 0),
+			DisabledIcon = f.icon(nil, iconIndex[item.ClassName] or iconIndex.Model or 0),
+			Shortcut = "",
+			Disabled = false,
+			OnClick = function()
+				insertContext:Hide()
+				local created, err = f.insertObject(item.ClassName, targetParent)
+				if not created and settingsPanelState.Status then
+					f.setSettingsStatus("Insert failed: "..tostring(err), BrandConfig.Theme.Danger)
+				end
+			end
+		})
+	end
+	insertContext:Refresh()
+	f.styleContextMenu(insertContext)
+	insertContext:Show(gui, x, y)
+end
+
+function f.getScriptSourceObject(obj)
+	if not obj then return nil, nil end
+	local ok, source = pcall(function()
+		return obj.Source
+	end)
+	if ok and type(source) == "string" then
+		return obj, source
+	end
+	return nil, nil
+end
+
+function f.refreshScriptViewerStatus(message, color)
+	if not scriptViewerPanel then return end
+	local content = scriptViewerPanel:FindFirstChild("Content")
+	local body = content and (content:FindFirstChild("ViewerBody") or content:FindFirstChild("List"))
+	local status = body and body:FindFirstChild("Status")
+	if status then
+		status.Text = message
+		status.TextColor3 = color or BrandConfig.Theme.TextSoft
+	end
+end
+
+function f.syncScriptViewerSelection(force)
+	if not scriptViewerPanel then return end
+	local content = scriptViewerPanel:FindFirstChild("Content")
+	if not content then return end
+	local body = content:FindFirstChild("ViewerBody") or content:FindFirstChild("List")
+	if not body then return end
+	local pathLabel = body:FindFirstChild("PathLabel")
+	local editor = body:FindFirstChild("SourceEditor")
+	local saveButton = body:FindFirstChild("SaveButton")
+	local followButton = body:FindFirstChild("FollowButton")
+	if not pathLabel or not editor or not saveButton or not followButton then
+		return
+	end
+	followButton.Text = scriptViewerState.FollowSelection and "Follow: On" or "Follow: Off"
+	local target = f.getPrimarySelection()
+	local sourceObj, sourceText = f.getScriptSourceObject(target)
+	if scriptViewerState.Dirty and sourceObj ~= scriptViewerState.Target and not force then
+		return
+	end
+	if not scriptViewerState.FollowSelection and not force then
+		return
+	end
+	if sourceObj ~= scriptViewerState.Target or force then
+		if scriptViewerState.Dirty and sourceObj ~= scriptViewerState.Target and not force then
+			return
+		end
+		scriptViewerState.Target = sourceObj
+		scriptViewerState.Syncing = true
+		editor.Text = sourceText or ""
+		scriptViewerState.Syncing = false
+		scriptViewerState.Dirty = false
+	end
+	editor.TextEditable = sourceObj ~= nil
+	saveButton.TextColor3 = scriptViewerState.Dirty and BrandConfig.Theme.AccentOrange or BrandConfig.Theme.TextSoft
+	if sourceObj then
+		pathLabel.Text = sourceObj:GetFullName()
+		f.refreshScriptViewerStatus(scriptViewerState.Dirty and "Unsaved source changes." or "Source ready.", scriptViewerState.Dirty and BrandConfig.Theme.AccentOrange or BrandConfig.Theme.Success)
+	else
+		pathLabel.Text = "Select a Script, LocalScript, or ModuleScript to inspect source."
+		f.refreshScriptViewerStatus("No script selected.", BrandConfig.Theme.TextMuted)
+	end
+end
+
+function f.saveScriptViewerSource()
+	local content = scriptViewerPanel and scriptViewerPanel:FindFirstChild("Content")
+	if not content then return end
+	local body = content:FindFirstChild("ViewerBody") or content:FindFirstChild("List")
+	local editor = body and body:FindFirstChild("SourceEditor")
+	if not editor or not scriptViewerState.Target then
+		f.refreshScriptViewerStatus("Nothing to save.", BrandConfig.Theme.TextMuted)
+		return
+	end
+	local ok, err = pcall(function()
+		scriptViewerState.Target.Source = editor.Text
+	end)
+	if ok then
+		scriptViewerState.Dirty = false
+		f.refreshScriptViewerStatus("Source saved.", BrandConfig.Theme.Success)
+		f.syncScriptViewerSelection(true)
+	else
+		f.refreshScriptViewerStatus("Save failed: "..tostring(err), BrandConfig.Theme.Danger)
+	end
+end
+
 function f.getPrimarySelection()
 	if explorerTree and explorerTree.Selection and #explorerTree.Selection.List > 0 then
 		return explorerTree.Selection.List[1]
@@ -3362,6 +4199,7 @@ function f.focusObject(obj)
 		propertiesTree:TreeUpdate()
 		propertiesTree:Refresh()
 	end
+	f.syncScriptViewerSelection()
 	return true
 end
 
@@ -3511,12 +4349,31 @@ function f.floatWindow(window, position)
 	f.detachWindow(window)
 	window.Parent = gui
 	window.Position = position or UDim2.new(0.5,-150,0.5,-200)
-	window.Size = UDim2.new(0,320,0,420)
+	window:SetAttribute("FloatWidth", window:GetAttribute("FloatWidth") or 320)
+	window:SetAttribute("FloatHeight", window:GetAttribute("FloatHeight") or 420)
+	window.Size = UDim2.new(0,window:GetAttribute("FloatWidth"),0,window:GetAttribute("FloatHeight"))
+	if window:FindFirstChild("ResizeHandle") then
+		window.ResizeHandle.Visible = true
+	end
 end
 
 function f.applyViewPreset(name)
 	currentViewPreset = name or currentViewPreset
 	topMenuViewName.Text = currentViewPreset
+	for _,window in pairs(activeWindows) do
+		if window ~= explorerPanel and window ~= propertiesPanel and f.checkInPane(window) then
+			local absolutePosition = window.AbsolutePosition
+			local absoluteSize = window.AbsoluteSize
+			window:SetAttribute("FloatWidth", math.max(absoluteSize.X, window:GetAttribute("FloatWidth") or 320))
+			window:SetAttribute("FloatHeight", math.max(absoluteSize.Y, window:GetAttribute("FloatHeight") or 320))
+			window.Parent = gui
+			window.Position = UDim2.new(0,absolutePosition.X,0,absolutePosition.Y)
+			window.Size = UDim2.new(0,window:GetAttribute("FloatWidth"),0,window:GetAttribute("FloatHeight"))
+			if window:FindFirstChild("ResizeHandle") then
+				window.ResizeHandle.Visible = true
+			end
+		end
+	end
 	for i = #LPaneItems,1,-1 do
 		table.remove(LPaneItems,i)
 	end
@@ -3583,6 +4440,7 @@ function f.showPanelMenu(window)
 	if not window or not window:FindFirstChild("TopBar") then return end
 	local button = window.TopBar:FindFirstChild("Settings")
 	if not button then return end
+	local hasSearch = window.TopBar:FindFirstChild("SearchFrame") and window.TopBar.SearchFrame.Visible ~= false
 	local menu = panelMenus[window]
 	if not menu then
 		menu = ContextMenu.new()
@@ -3592,7 +4450,7 @@ function f.showPanelMenu(window)
 	menu:Add({
 		Name = "Focus Search",
 		Shortcut = "",
-		Disabled = false,
+		Disabled = not hasSearch,
 		OnClick = function()
 			menu:Hide()
 			local search = window.TopBar.SearchFrame.Search
@@ -3629,20 +4487,34 @@ function f.showPanelMenu(window)
 			f.floatWindow(window)
 		end
 	})
+	menu:AddDivider()
+	menu:Add({
+		Name = "Open UI Settings",
+		Shortcut = "",
+		Disabled = false,
+		OnClick = function()
+			menu:Hide()
+			f.showWindow(settingsPanel, "Right")
+			f.refreshSettingsValues()
+		end
+	})
+	menu:Add({
+		Name = "Open Script Viewer",
+		Shortcut = "",
+		Disabled = false,
+		OnClick = function()
+			menu:Hide()
+			f.showWindow(scriptViewerPanel, "Right")
+			f.syncScriptViewerSelection(true)
+		end
+	})
 	menu:Add({
 		Name = window.Visible and "Hide Panel" or "Show Panel",
 		Shortcut = "",
 		Disabled = false,
 		OnClick = function()
 			menu:Hide()
-			if window.Visible then
-				f.detachWindow(window)
-				window.Visible = false
-				f.buildPanes()
-			else
-				window.Visible = true
-				f.addToPane(window, window == explorerPanel and "Left" or "Right")
-			end
+			f.toggleWindow(window, f.getDefaultPane(window))
 		end
 	})
 	menu:Refresh()
@@ -3652,6 +4524,10 @@ end
 
 function f.initializeChrome()
 	f.applyBaseTheme()
+	if chromeInitialized then
+		return
+	end
+	chromeInitialized = true
 	if not topMenuContext then
 		topMenuContext = ContextMenu.new()
 	end
@@ -3678,6 +4554,39 @@ function f.initializeChrome()
 			f.hideOverlay()
 		else
 			f.showOverlay(false)
+		end
+	end)
+	topMenuSettingsButton.MouseButton1Click:Connect(function()
+		f.toggleWindow(settingsPanel, "Right")
+		if settingsPanel and settingsPanel.Visible then
+			f.refreshSettingsValues()
+		end
+	end)
+	topMenuScriptButton.MouseButton1Click:Connect(function()
+		f.toggleWindow(scriptViewerPanel, "Right")
+		f.syncScriptViewerSelection(true)
+	end)
+	topMenuConsoleButton.MouseButton1Click:Connect(function()
+		f.toggleWindow(consolePanel, "Right")
+	end)
+	topMenuSaveButton.MouseButton1Click:Connect(function()
+		f.toggleWindow(saveInstancePanel, "Right")
+	end)
+	topMenuMinimizeButton.MouseButton1Click:Connect(function()
+		f.toggleUiMinimized()
+	end)
+	topMenuCloseButton.MouseButton1Click:Connect(function()
+		if topMenuContext then topMenuContext:Hide() end
+		if rightClickContext then rightClickContext:Hide() end
+		if insertContext then insertContext:Hide() end
+		gui:Destroy()
+	end)
+	Services.UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if Services.UserInputService:GetFocusedTextBox() then return end
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		if input.KeyCode == Enum.KeyCode.Delete or input.KeyCode == Enum.KeyCode.Backspace then
+			f.deleteSelection()
 		end
 	end)
 end
@@ -3726,6 +4635,7 @@ function f.refreshExplorers(id)
 	if propertiesTree then
 		propertiesTree:Refresh()
 	end
+	f.syncScriptViewerSelection()
 end
 
 -- Properties Functions
@@ -4057,6 +4967,10 @@ end
 
 function f.newProperties()
 	local newgui = getResource("PropertiesPanel")
+	newgui.Name = "PropertiesPanel"
+	newgui:SetAttribute("DefaultPane", "Right")
+	newgui:SetAttribute("FloatWidth", 340)
+	newgui:SetAttribute("FloatHeight", 430)
 	f.applyWindowTheme(newgui, BrandConfig.Theme.AccentBlue)
 	local propertiesScroll = ScrollBar.new()
 	local propertiesScrollH = ScrollBar.new(true)
@@ -4196,29 +5110,32 @@ function f.newProperties()
 	end
 	
 	propertiesScroll.Gui.Parent = newgui.Content
-	propertiesScroll:Texture({
-		FrameColor = BrandConfig.Theme.PanelRaised,
-		ThumbColor = BrandConfig.Theme.AccentBlueDeep,
-		ThumbSelectColor = BrandConfig.Theme.AccentBlue,
-		ButtonColor = BrandConfig.Theme.SurfaceAlt,
-		ArrowColor = BrandConfig.Theme.Text
-	})
+	scrollThemeCallbacks.PropertiesScroll = function()
+		propertiesScroll:Texture({
+			FrameColor = BrandConfig.Theme.PanelRaised,
+			ThumbColor = BrandConfig.Theme.AccentBlueDeep,
+			ThumbSelectColor = BrandConfig.Theme.AccentBlue,
+			ButtonColor = BrandConfig.Theme.SurfaceAlt,
+			ArrowColor = BrandConfig.Theme.Text
+		})
+		propertiesScrollH:Texture({
+			FrameColor = BrandConfig.Theme.PanelRaised,
+			ThumbColor = BrandConfig.Theme.AccentBlueDeep,
+			ThumbSelectColor = BrandConfig.Theme.AccentBlue,
+			ButtonColor = BrandConfig.Theme.SurfaceAlt,
+			ArrowColor = BrandConfig.Theme.Text
+		})
+	end
+	scrollThemeCallbacks.PropertiesScroll()
 	propertiesScroll:SetScrollFrame(newgui.Content,3)
 	
 	propertiesScrollH.Gui.Visible = false
 	propertiesScrollH.Gui.Parent = newgui.Content
-	propertiesScrollH:Texture({
-		FrameColor = BrandConfig.Theme.PanelRaised,
-		ThumbColor = BrandConfig.Theme.AccentBlueDeep,
-		ThumbSelectColor = BrandConfig.Theme.AccentBlue,
-		ButtonColor = BrandConfig.Theme.SurfaceAlt,
-		ArrowColor = BrandConfig.Theme.Text
-	})
 	propertiesScrollH.Gui.Position = UDim2.new(0,0,1,-16)
 	propertiesScrollH.Gui.Size = UDim2.new(1,-16,0,16)
 	
 	newTree.OnUpdate = function(self)
-		local guiX = propertiesPanel.Content.AbsoluteSize.X-16
+		local guiX = newgui.Content.AbsoluteSize.X-16
 		--[[
 		propertiesScrollH.VisibleSpace = guiX
 		propertiesScrollH.TotalSpace = nodeWidth+10
@@ -4278,6 +5195,601 @@ function f.newProperties()
 	return newgui
 end
 
+function f.newSettingsPanel()
+	local newgui = getResource("ExplorerPanel")
+	newgui.Name = "SettingsPanel"
+	newgui:SetAttribute("DefaultPane", "Right")
+	newgui:SetAttribute("FloatWidth", 360)
+	newgui:SetAttribute("FloatHeight", 410)
+	newgui.TopBar.WindowTitle.Text = "UI Settings"
+	newgui.TopBar.SearchFrame.Visible = false
+	f.applyWindowTheme(newgui, BrandConfig.Theme.AccentOrange)
+	local body = newgui.Content.List
+	body.Name = "SettingsBody"
+	body.BackgroundColor3 = BrandConfig.Theme.PanelAlt
+	body.BorderSizePixel = 0
+	local padding = Instance.new("UIPadding")
+	padding.Name = "BodyPadding"
+	padding.PaddingTop = UDim.new(0,12)
+	padding.PaddingLeft = UDim.new(0,12)
+	padding.PaddingRight = UDim.new(0,12)
+	padding.PaddingBottom = UDim.new(0,12)
+	padding.Parent = body
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0,10)
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = body
+	local intro = CreateInstance("TextLabel",{
+		Name = "Intro",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,36),
+		Text = "Tune pane widths, corner radius, and the orange-blue GokuDex accents.",
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		LayoutOrder = 1,
+		Parent = body
+	})
+	local fields = {}
+	local labels = {}
+	local inputs = {}
+	local function createField(key, labelText, order)
+		local row = CreateInstance("Frame",{
+			Name = key.."Row",
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1,0,0,48),
+			LayoutOrder = order,
+			Parent = body
+		})
+		local label = CreateInstance("TextLabel",{
+			Name = "Label",
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1,0,0,16),
+			Text = labelText,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Center,
+			Parent = row
+		})
+		local input = CreateInstance("TextBox",{
+			Name = "Input",
+			BackgroundColor3 = BrandConfig.Theme.Field,
+			BorderSizePixel = 0,
+			ClearTextOnFocus = false,
+			Position = UDim2.new(0,0,0,22),
+			Size = UDim2.new(1,0,0,24),
+			Text = "",
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = row
+		})
+		ensureUICorner(input, BrandConfig.Radii.Small)
+		ensureUIStroke(input, "ThemeStroke", BrandConfig.Theme.FieldBorder, 0.1, 1)
+		fields[key] = input
+		labels[key] = label
+		inputs[key] = input
+	end
+	createField("LeftWidth", "Left Pane Width", 2)
+	createField("RightWidth", "Right Pane Width", 3)
+	createField("CornerRadius", "Corner Radius", 4)
+	createField("OrangeRGB", "Orange Accent RGB", 5)
+	createField("BlueRGB", "Blue Accent RGB", 6)
+	local buttonsRow = CreateInstance("Frame",{
+		Name = "ButtonsRow",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,28),
+		LayoutOrder = 7,
+		Parent = body
+	})
+	local applyButton = CreateInstance("TextButton",{
+		Name = "ApplyButton",
+		AutoButtonColor = false,
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0.5,-6,1,0),
+		Text = "Apply",
+		Parent = buttonsRow
+	})
+	local resetButton = CreateInstance("TextButton",{
+		Name = "ResetButton",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1,0),
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1,0,0,0),
+		Size = UDim2.new(0.5,-6,1,0),
+		Text = "Reset",
+		Parent = buttonsRow
+	})
+	ensureUICorner(applyButton, BrandConfig.Radii.Small)
+	ensureUICorner(resetButton, BrandConfig.Radii.Small)
+	local status = CreateInstance("TextLabel",{
+		Name = "Status",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,18),
+		Text = "",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		LayoutOrder = 8,
+		Parent = body
+	})
+	settingsPanelState = {
+		Panel = newgui,
+		Fields = fields,
+		Status = status
+	}
+	scrollThemeCallbacks.SettingsPanelTheme = function()
+		body.BackgroundColor3 = BrandConfig.Theme.PanelAlt
+		styleText(intro, BrandConfig.Fonts.Body, 13, BrandConfig.Theme.TextSoft)
+		for key,label in pairs(labels) do
+			styleText(label, BrandConfig.Fonts.Heading, 13, BrandConfig.Theme.Text)
+		end
+		for key,input in pairs(inputs) do
+			input.BackgroundColor3 = BrandConfig.Theme.Field
+			ensureUICorner(input, BrandConfig.Radii.Small)
+			ensureUIStroke(input, "ThemeStroke", BrandConfig.Theme.FieldBorder, 0.1, 1)
+			styleText(input, BrandConfig.Fonts.Body, 13, BrandConfig.Theme.Text)
+		end
+		applyButton.BackgroundColor3 = BrandConfig.Theme.PanelRaised
+		resetButton.BackgroundColor3 = BrandConfig.Theme.PanelRaised
+		ensureUIStroke(applyButton, "ThemeStroke", BrandConfig.Theme.AccentOrange, 0.08, 1)
+		ensureUIStroke(resetButton, "ThemeStroke", BrandConfig.Theme.StrokeSoft, 0.08, 1)
+		styleText(applyButton, BrandConfig.Fonts.Heading, 13, BrandConfig.Theme.AccentOrange)
+		styleText(resetButton, BrandConfig.Fonts.Heading, 13, BrandConfig.Theme.TextSoft)
+		bindHover(applyButton, BrandConfig.Theme.PanelRaised, BrandConfig.Theme.SurfaceAlt, 0, 0)
+		bindHover(resetButton, BrandConfig.Theme.PanelRaised, BrandConfig.Theme.SurfaceAlt, 0, 0)
+		styleText(status, BrandConfig.Fonts.Body, 12, BrandConfig.Theme.TextSoft)
+	end
+	scrollThemeCallbacks.SettingsPanelTheme()
+	f.refreshSettingsValues()
+	f.setSettingsStatus("Theme controls ready.", BrandConfig.Theme.TextSoft)
+	applyButton.MouseButton1Click:Connect(function()
+		f.applyCustomizationSettings()
+	end)
+	resetButton.MouseButton1Click:Connect(function()
+		f.resetCustomizationSettings()
+	end)
+	table.insert(activeWindows,newgui)
+	f.hookWindowListener(newgui)
+	newgui.TopBar.Settings.MouseButton1Click:Connect(function()
+		f.showPanelMenu(newgui)
+	end)
+	return newgui
+end
+
+function f.newScriptViewer()
+	local newgui = getResource("ExplorerPanel")
+	newgui.Name = "ScriptViewerPanel"
+	newgui:SetAttribute("DefaultPane", "Right")
+	newgui:SetAttribute("FloatWidth", 460)
+	newgui:SetAttribute("FloatHeight", 430)
+	newgui.TopBar.WindowTitle.Text = "Script Viewer"
+	newgui.TopBar.SearchFrame.Visible = false
+	f.applyWindowTheme(newgui, BrandConfig.Theme.AccentBlue)
+	local body = newgui.Content.List
+	body.Name = "ViewerBody"
+	body.BorderSizePixel = 0
+	local pathLabel = CreateInstance("TextLabel",{
+		Name = "PathLabel",
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0,10,0,8),
+		Size = UDim2.new(1,-216,0,18),
+		Text = "Select a Script, LocalScript, or ModuleScript to inspect source.",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = body
+	})
+	local reloadButton = CreateInstance("TextButton",{
+		Name = "ReloadButton",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1,0),
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1,-156,0,6),
+		Size = UDim2.new(0,54,0,22),
+		Text = "Reload",
+		Parent = body
+	})
+	local followButton = CreateInstance("TextButton",{
+		Name = "FollowButton",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1,0),
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1,-72,0,6),
+		Size = UDim2.new(0,80,0,22),
+		Text = "Follow: On",
+		Parent = body
+	})
+	local saveButton = CreateInstance("TextButton",{
+		Name = "SaveButton",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1,0),
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1,-4,0,6),
+		Size = UDim2.new(0,56,0,22),
+		Text = "Save",
+		Parent = body
+	})
+	local editor = CreateInstance("TextBox",{
+		Name = "SourceEditor",
+		BackgroundColor3 = BrandConfig.Theme.Field,
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		MultiLine = true,
+		Position = UDim2.new(0,10,0,38),
+		Size = UDim2.new(1,-20,1,-72),
+		Text = "",
+		TextEditable = false,
+		TextWrapped = false,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Parent = body
+	})
+	local status = CreateInstance("TextLabel",{
+		Name = "Status",
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0,10,1,-26),
+		Size = UDim2.new(1,-20,0,16),
+		Text = "",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		Parent = body
+	})
+	scrollThemeCallbacks.ScriptViewerTheme = function()
+		body.BackgroundColor3 = BrandConfig.Theme.PanelAlt
+		styleText(pathLabel, BrandConfig.Fonts.Mono, 12, BrandConfig.Theme.TextSoft)
+		for _,button in ipairs({reloadButton, followButton, saveButton}) do
+			button.BackgroundColor3 = BrandConfig.Theme.PanelRaised
+			ensureUICorner(button, BrandConfig.Radii.Small)
+			ensureUIStroke(button, "ThemeStroke", BrandConfig.Theme.StrokeSoft, 0.08, 1)
+			styleText(button, BrandConfig.Fonts.Heading, 12, button == saveButton and BrandConfig.Theme.TextSoft or BrandConfig.Theme.TextSoft)
+			bindHover(button, BrandConfig.Theme.PanelRaised, BrandConfig.Theme.SurfaceAlt, 0, 0)
+		end
+		editor.BackgroundColor3 = BrandConfig.Theme.Field
+		ensureUICorner(editor, BrandConfig.Radii.Small)
+		ensureUIStroke(editor, "ThemeStroke", BrandConfig.Theme.FieldBorder, 0.1, 1)
+		styleText(editor, BrandConfig.Fonts.Mono, 13, BrandConfig.Theme.Text)
+		styleText(status, BrandConfig.Fonts.Body, 12, BrandConfig.Theme.TextSoft)
+	end
+	scrollThemeCallbacks.ScriptViewerTheme()
+	table.insert(activeWindows,newgui)
+	f.hookWindowListener(newgui)
+	newgui.TopBar.Settings.MouseButton1Click:Connect(function()
+		f.showPanelMenu(newgui)
+	end)
+	reloadButton.MouseButton1Click:Connect(function()
+		scriptViewerState.Dirty = false
+		f.syncScriptViewerSelection(true)
+	end)
+	followButton.MouseButton1Click:Connect(function()
+		scriptViewerState.FollowSelection = not scriptViewerState.FollowSelection
+		f.syncScriptViewerSelection(true)
+	end)
+	saveButton.MouseButton1Click:Connect(function()
+		f.saveScriptViewerSource()
+	end)
+	editor:GetPropertyChangedSignal("Text"):Connect(function()
+		if scriptViewerState.Syncing then return end
+		if scriptViewerState.Target then
+			scriptViewerState.Dirty = true
+			f.refreshScriptViewerStatus("Unsaved source changes.", BrandConfig.Theme.AccentOrange)
+			saveButton.TextColor3 = BrandConfig.Theme.AccentOrange
+		end
+	end)
+	f.syncScriptViewerSelection(true)
+	return newgui
+end
+
+function f.newConsolePanel()
+	local newgui = getResource("ExplorerPanel")
+	newgui.Name = "ConsolePanel"
+	newgui:SetAttribute("DefaultPane", "Right")
+	newgui:SetAttribute("FloatWidth", 460)
+	newgui:SetAttribute("FloatHeight", 430)
+	newgui.TopBar.WindowTitle.Text = "Console"
+	newgui.TopBar.SearchFrame.Visible = false
+	f.applyWindowTheme(newgui, BrandConfig.Theme.AccentBlue)
+	local body = newgui.Content.List
+	body.Name = "ConsoleBody"
+	body.BorderSizePixel = 0
+	
+	local outputScroll = CreateInstance("ScrollingFrame",{
+		Name = "OutputScroll",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0,10,0,10),
+		Size = UDim2.new(1,-20,1,-50),
+		CanvasSize = UDim2.new(0,0,0,0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 6,
+		Parent = body
+	})
+	local listLayout = Instance.new("UIListLayout", outputScroll)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Padding = UDim.new(0, 2)
+	
+	local commandLine = CreateInstance("TextBox",{
+		Name = "CommandLine",
+		BackgroundColor3 = BrandConfig.Theme.Field,
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		Position = UDim2.new(0,10,1,-35),
+		Size = UDim2.new(1,-80,0,25),
+		Text = "",
+		PlaceholderText = "Run a command...",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = body
+	})
+	
+	local clearButton = CreateInstance("TextButton",{
+		Name = "ClearButton",
+		AutoButtonColor = false,
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1,-60,1,-35),
+		Size = UDim2.new(0,50,0,25),
+		Text = "Clear",
+		Parent = body
+	})
+	
+	scrollThemeCallbacks.ConsoleTheme = function()
+		body.BackgroundColor3 = BrandConfig.Theme.PanelAlt
+		commandLine.BackgroundColor3 = BrandConfig.Theme.Field
+		ensureUICorner(commandLine, BrandConfig.Radii.Small)
+		ensureUIStroke(commandLine, "ThemeStroke", BrandConfig.Theme.FieldBorder, 0.1, 1)
+		styleText(commandLine, BrandConfig.Fonts.Mono, 13, BrandConfig.Theme.Text)
+		
+		clearButton.BackgroundColor3 = BrandConfig.Theme.PanelRaised
+		ensureUICorner(clearButton, BrandConfig.Radii.Small)
+		ensureUIStroke(clearButton, "ThemeStroke", BrandConfig.Theme.StrokeSoft, 0.1, 1)
+		styleText(clearButton, BrandConfig.Fonts.Heading, 13, BrandConfig.Theme.TextSoft)
+		bindHover(clearButton, BrandConfig.Theme.PanelRaised, BrandConfig.Theme.SurfaceAlt, 0, 0)
+	end
+	scrollThemeCallbacks.ConsoleTheme()
+	
+	local displayedOutput = {}
+	local logCount = 0
+	local function addLog(msg, msgtype)
+		local color = BrandConfig.Theme.TextSoft
+		if msgtype == Enum.MessageType.MessageWarning then
+			color = BrandConfig.Theme.AccentOrange
+		elseif msgtype == Enum.MessageType.MessageError then
+			color = BrandConfig.Theme.Danger
+		elseif msgtype == Enum.MessageType.MessageInfo then
+			color = BrandConfig.Theme.AccentBlue
+		end
+		
+		logCount = logCount + 1
+		local logLabel = CreateInstance("TextLabel",{
+			Name = "Log_"..logCount,
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1,0,0,0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			Text = os.date("%H:%M:%S").."  "..msg,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = color,
+			LayoutOrder = logCount,
+			Parent = outputScroll
+		})
+		styleText(logLabel, BrandConfig.Fonts.Mono, 13, color)
+		table.insert(displayedOutput, logLabel)
+		
+		if #displayedOutput > 500 then
+			local oldest = table.remove(displayedOutput, 1)
+			if oldest then oldest:Destroy() end
+		end
+		
+		task.spawn(function()
+			outputScroll.CanvasPosition = Vector2.new(0, 9e9)
+		end)
+	end
+	
+	local LogService = Services.LogService
+	LogService.MessageOut:Connect(addLog)
+	
+	commandLine.FocusLost:Connect(function(enterPressed)
+		if enterPressed and commandLine.Text ~= "" then
+			local code = commandLine.Text
+			commandLine.Text = ""
+			addLog("> "..code, Enum.MessageType.MessageOutput)
+			local func, err = loadstring(code)
+			if func then
+				task.spawn(function()
+					local success, execErr = pcall(func)
+					if not success then
+						addLog(tostring(execErr), Enum.MessageType.MessageError)
+					end
+				end)
+			else
+				addLog(tostring(err), Enum.MessageType.MessageError)
+			end
+		end
+	end)
+	
+	clearButton.MouseButton1Click:Connect(function()
+		for _, log in pairs(displayedOutput) do
+			log:Destroy()
+		end
+		displayedOutput = {}
+	end)
+	
+	table.insert(activeWindows,newgui)
+	f.hookWindowListener(newgui)
+	newgui.TopBar.Settings.MouseButton1Click:Connect(function()
+		f.showPanelMenu(newgui)
+	end)
+	return newgui
+end
+
+function f.newSaveInstancePanel()
+	local newgui = getResource("ExplorerPanel")
+	newgui.Name = "SaveInstancePanel"
+	newgui:SetAttribute("DefaultPane", "Right")
+	newgui:SetAttribute("FloatWidth", 360)
+	newgui:SetAttribute("FloatHeight", 410)
+	newgui.TopBar.WindowTitle.Text = "Save Instance"
+	newgui.TopBar.SearchFrame.Visible = false
+	f.applyWindowTheme(newgui, BrandConfig.Theme.AccentOrange)
+	
+	local body = newgui.Content.List
+	body.Name = "SaveInstanceBody"
+	body.BackgroundColor3 = BrandConfig.Theme.PanelAlt
+	body.BorderSizePixel = 0
+	
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0,12)
+	padding.PaddingLeft = UDim.new(0,12)
+	padding.PaddingRight = UDim.new(0,12)
+	padding.PaddingBottom = UDim.new(0,12)
+	padding.Parent = body
+	
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0,10)
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = body
+	
+	local intro = CreateInstance("TextLabel",{
+		Name = "Intro",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,36),
+		Text = "Configure options for decompiling and saving the game.",
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		LayoutOrder = 1,
+		Parent = body
+	})
+	
+	local settingsData = {
+		Decompile = true,
+		NilInstances = false,
+		RemovePlayerCharacters = true,
+		SavePlayers = false,
+		IsolateStarterPlayer = true,
+		IgnoreDefaultProps = true
+	}
+	
+	local checkboxes = {}
+	local function createCheckbox(key, labelText, order)
+		local row = CreateInstance("Frame",{
+			Name = key.."Row",
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1,0,0,24),
+			LayoutOrder = order,
+			Parent = body
+		})
+		local label = CreateInstance("TextLabel",{
+			Name = "Label",
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1,-30,1,0),
+			Position = UDim2.new(0,30,0,0),
+			Text = labelText,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = row
+		})
+		local box = CreateInstance("TextButton",{
+			Name = "Box",
+			BackgroundColor3 = BrandConfig.Theme.Field,
+			BorderSizePixel = 0,
+			Size = UDim2.new(0,20,0,20),
+			Position = UDim2.new(0,0,0,2),
+			Text = settingsData[key] and "✓" or "",
+			Parent = row
+		})
+		ensureUICorner(box, BrandConfig.Radii.Small)
+		ensureUIStroke(box, "ThemeStroke", BrandConfig.Theme.FieldBorder, 0.1, 1)
+		
+		box.MouseButton1Click:Connect(function()
+			settingsData[key] = not settingsData[key]
+			box.Text = settingsData[key] and "✓" or ""
+			box.TextColor3 = settingsData[key] and BrandConfig.Theme.AccentOrange or BrandConfig.Theme.TextSoft
+		end)
+		
+		checkboxes[key] = {Row = row, Label = label, Box = box}
+	end
+	
+	createCheckbox("Decompile", "Decompile Scripts", 2)
+	createCheckbox("NilInstances", "Save Nil Instances", 3)
+	createCheckbox("RemovePlayerCharacters", "Remove Player Characters", 4)
+	createCheckbox("SavePlayers", "Save Player Instance", 5)
+	createCheckbox("IsolateStarterPlayer", "Isolate StarterPlayer", 6)
+	createCheckbox("IgnoreDefaultProps", "Ignore Default Properties", 7)
+	
+	local saveButton = CreateInstance("TextButton",{
+		Name = "SaveButton",
+		AutoButtonColor = false,
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1,0,0,28),
+		LayoutOrder = 8,
+		Text = "Save Game",
+		Parent = body
+	})
+	ensureUICorner(saveButton, BrandConfig.Radii.Small)
+	
+	local status = CreateInstance("TextLabel",{
+		Name = "Status",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,0,18),
+		Text = "",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		LayoutOrder = 9,
+		Parent = body
+	})
+	
+	scrollThemeCallbacks.SaveInstanceTheme = function()
+		body.BackgroundColor3 = BrandConfig.Theme.PanelAlt
+		styleText(intro, BrandConfig.Fonts.Body, 13, BrandConfig.Theme.TextSoft)
+		
+		for key, elems in pairs(checkboxes) do
+			styleText(elems.Label, BrandConfig.Fonts.Heading, 13, BrandConfig.Theme.Text)
+			elems.Box.BackgroundColor3 = BrandConfig.Theme.Field
+			ensureUIStroke(elems.Box, "ThemeStroke", BrandConfig.Theme.FieldBorder, 0.1, 1)
+			styleText(elems.Box, BrandConfig.Fonts.Heading, 14, settingsData[key] and BrandConfig.Theme.AccentOrange or BrandConfig.Theme.TextSoft)
+		end
+		
+		saveButton.BackgroundColor3 = BrandConfig.Theme.PanelRaised
+		ensureUIStroke(saveButton, "ThemeStroke", BrandConfig.Theme.AccentOrange, 0.08, 1)
+		styleText(saveButton, BrandConfig.Fonts.Heading, 13, BrandConfig.Theme.AccentOrange)
+		bindHover(saveButton, BrandConfig.Theme.PanelRaised, BrandConfig.Theme.SurfaceAlt, 0, 0)
+		styleText(status, BrandConfig.Fonts.Body, 12, BrandConfig.Theme.TextSoft)
+	end
+	scrollThemeCallbacks.SaveInstanceTheme()
+	
+	saveButton.MouseButton1Click:Connect(function()
+		status.Text = "Saving game... please wait."
+		status.TextColor3 = BrandConfig.Theme.AccentOrange
+		task.spawn(function()
+			local ok, err = pcall(function()
+				if saveinstance then
+					saveinstance(settingsData)
+				else
+					error("saveinstance is not supported by your executor.")
+				end
+			end)
+			if ok then
+				status.Text = "Game saved successfully."
+				status.TextColor3 = BrandConfig.Theme.Success
+			else
+				status.Text = "Save failed: " .. tostring(err)
+				status.TextColor3 = BrandConfig.Theme.Danger
+			end
+		end)
+	end)
+	
+	table.insert(activeWindows,newgui)
+	f.hookWindowListener(newgui)
+	newgui.TopBar.Settings.MouseButton1Click:Connect(function()
+		f.showPanelMenu(newgui)
+	end)
+	return newgui
+end
+
 local function welcomePlayer()
 	f.clearLoadIssues()
 	f.showOverlay(true)
@@ -4307,6 +5819,9 @@ local function welcomePlayer()
 end
 
 mouse.Move:Connect(function()
+	if not gui or not gui.Parent then
+		return
+	end
 	local x,y = mouse.X,mouse.Y
 	
 	if x <= 50 then
@@ -4321,6 +5836,14 @@ end)
 
 explorerPanel = f.newExplorer()
 propertiesPanel = f.newProperties()
+settingsPanel = f.newSettingsPanel()
+settingsPanel.Visible = false
+scriptViewerPanel = f.newScriptViewer()
+scriptViewerPanel.Visible = false
+consolePanel = f.newConsolePanel()
+consolePanel.Visible = false
+saveInstancePanel = f.newSaveInstancePanel()
+saveInstancePanel.Visible = false
 f.initializeChrome()
 
 for category,_ in pairs(categoryOrder) do
