@@ -6,6 +6,31 @@
 	RASPBERRY PI IS A SKIDDY SKID AF
 --]]
 
+-- Executor & Environment Bridge (Ensures flawless native compatibility across all executors)
+local function getGlobal(name)
+	local ok, val = pcall(function()
+		local genv = (getfenv and getfenv())
+		if genv and genv[name] ~= nil then return genv[name] end
+		if rawget and getfenv and rawget(getfenv(), name) ~= nil then return rawget(getfenv(), name) end
+		return nil
+	end)
+	return ok and val or nil
+end
+
+local cloneref = getGlobal("cloneref")
+local getgenv = getGlobal("getgenv")
+local syn = getGlobal("syn")
+local gethui = getGlobal("gethui")
+local protectgui = getGlobal("protectgui")
+local decompile = getGlobal("decompile")
+local saveinstance = getGlobal("saveinstance")
+local save_instance = getGlobal("save_instance")
+local toclipboard = getGlobal("toclipboard")
+local setclipboard = getGlobal("setclipboard") or toclipboard
+local http_request = getGlobal("http_request")
+local request = getGlobal("request") or (syn and syn.request) or http_request
+local getnilinstances = getGlobal("getnilinstances")
+
 -- Metas
 local function rgb(r,g,b)
 	return Color3.fromRGB(r,g,b)
@@ -27,7 +52,7 @@ local BrandConfig = {
 	},
 	Fonts = {
 		Title = Enum.Font.GothamBold,
-		Heading = Enum.Font.GothamSemibold,
+		Heading = Enum.Font.GothamMedium,
 		Body = Enum.Font.Gotham,
 		Mono = Enum.Font.Code
 	},
@@ -106,13 +131,18 @@ local InsertableClasses = {
 	{Name = "BindableFunction", ClassName = "BindableFunction"}
 }
 
-local Services = setmetatable({},{
+local safeRef = cloneref or (syn and syn.cloneref) or function(inst) return inst end
+
+local Services = setmetatable({}, {
 	__index = function(self, ind)
-		if pcall(function()game:GetService(ind)end) then
-			return game:GetService(ind)
-		else
-			return nil
+		local success, service = pcall(function()
+			return safeRef(game:GetService(ind))
+		end)
+		if success and service then
+			self[ind] = service
+			return service
 		end
+		return nil
 	end
 })
 
@@ -125,7 +155,7 @@ function CreateInstance(cls,props)
 end
 
 function createDexGui()
-	local DexGui = CreateInstance("ScreenGui",{DisplayOrder=0,Enabled=true,ResetOnSpawn=true,Name="Dex",})
+	local DexGui = CreateInstance("ScreenGui",{DisplayOrder=0,Enabled=true,ResetOnSpawn=false,Name="Dex",})
 	local DexGui2 = CreateInstance("Frame",{Style=0,Active=false,AnchorPoint=Vector2.new(0,0),BackgroundColor3=Color3.new(0.39215689897537,0.39215689897537,0.39215689897537),BackgroundTransparency=1,BorderColor3=Color3.new(0.10588236153126,0.16470588743687,0.20784315466881),BorderSizePixel=0,ClipsDescendants=false,Draggable=false,Position=UDim2.new(1,-300,0,0),Rotation=0,Selectable=false,Size=UDim2.new(0,300,1,0),SizeConstraint=0,Visible=true,ZIndex=1,Name="ContentFrameR",Parent = DexGui})
 	local DexGui3 = CreateInstance("Frame",{Style=0,Active=false,AnchorPoint=Vector2.new(0,0),BackgroundColor3=Color3.new(0.39215689897537,0.39215689897537,0.39215689897537),BackgroundTransparency=1,BorderColor3=Color3.new(0.10588236153126,0.16470588743687,0.20784315466881),BorderSizePixel=0,ClipsDescendants=false,Draggable=false,Position=UDim2.new(0,-300,0,0),Rotation=0,Selectable=false,Size=UDim2.new(0,300,1,0),SizeConstraint=0,Visible=true,ZIndex=1,Name="ContentFrameL",Parent = DexGui})
 	local DexGui4 = CreateInstance("Frame",{Style=0,Active=false,AnchorPoint=Vector2.new(0,0),BackgroundColor3=Color3.new(0.11764706671238,0.11764706671238,0.11764706671238),BackgroundTransparency=0,BorderColor3=Color3.new(0.10588236153126,0.16470588743687,0.20784315466881),BorderSizePixel=0,ClipsDescendants=false,Draggable=false,Position=UDim2.new(0.5,-150,0,0),Rotation=0,Selectable=false,Size=UDim2.new(0,300,0,36),SizeConstraint=0,Visible=false,ZIndex=10,Name="TopMenu",Parent = DexGui})
@@ -223,7 +253,39 @@ end
 
 -- Main Gui References
 local gui = createDexGui()
-gui.Parent = Services.CoreGui
+local safeGuiParent = nil
+if gethui then
+	local ok, hui = pcall(gethui)
+	if ok and hui then safeGuiParent = hui end
+end
+if not safeGuiParent then
+	if syn and syn.protect_gui then
+		pcall(syn.protect_gui, gui)
+	elseif protectgui then
+		pcall(protectgui, gui)
+	end
+	if Services.CoreGui then
+		local ok = pcall(function() gui.Parent = Services.CoreGui end)
+		if ok and gui.Parent == Services.CoreGui then
+			safeGuiParent = Services.CoreGui
+		end
+	end
+end
+if not safeGuiParent then
+	local player = Services.Players and Services.Players.LocalPlayer
+	if player then
+		local pgui = player:FindFirstChildWhichIsA("PlayerGui") or player:FindFirstChild("PlayerGui")
+		if pgui then
+			local ok = pcall(function() gui.Parent = pgui end)
+			if ok and gui.Parent == pgui then
+				safeGuiParent = pgui
+			end
+		end
+	end
+end
+if not gui.Parent then
+	pcall(function() gui.Parent = Services.CoreGui end)
+end
 local contentL = gui:WaitForChild("ContentFrameL")
 local contentR = gui:WaitForChild("ContentFrameR")
 local resources = gui:WaitForChild("Resources")
@@ -284,14 +346,48 @@ local explorerSettings = {
 local DefaultExplorerSettings = cloneTable(explorerSettings)
 
 -- JSON Stuff
-local API
-local RMD
-
 local beginMouseDrag
 local ensureFlatButton
 
 -- Main Variables
-local mouse = Services.Players.LocalPlayer:GetMouse()
+local LocalPlayer = Services.Players and Services.Players.LocalPlayer
+local mouse = nil
+if LocalPlayer then
+	pcall(function()
+		mouse = LocalPlayer:GetMouse()
+	end)
+end
+
+local function getMouseX()
+	if mouse then return mouse.X end
+	local uis = Services.UserInputService
+	if uis then
+		local ok, loc = pcall(function() return uis:GetMouseLocation() end)
+		if ok and loc then return loc.X end
+	end
+	return 0
+end
+
+local function getMouseY()
+	if mouse then return mouse.Y end
+	local uis = Services.UserInputService
+	if uis then
+		local ok, loc = pcall(function() return uis:GetMouseLocation() end)
+		if ok and loc then return loc.Y end
+	end
+	return 0
+end
+
+local function getMouseProxy()
+	if mouse then return mouse end
+	return setmetatable({}, {
+		__index = function(_, k)
+			if k == "X" then return getMouseX() end
+			if k == "Y" then return getMouseY() end
+			return 0
+		end
+	})
+end
 local mouseWindow = nil
 local LPaneItems = {}
 local RPaneItems = {}
@@ -383,10 +479,10 @@ end
 local ScrollBar do
 	ScrollBar = {}
 	
-	local user = game:GetService("UserInputService")
-	local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+	local user = Services.UserInputService or game:GetService("UserInputService")
+	local mouse = getMouseProxy()
 	
-	ScrollMt = {
+	local ScrollMt = {
 		__index = {
 			AddMarker = function(self,ind,color)
 				self.Markers[ind] = color or Color3.new(0,0,0)
@@ -714,10 +810,10 @@ local ScrollBar do
 				elseif pos < 0 then
 					pos = 0
 				end
-				if pos < thumbFrameDist and scrollThumbFrame.AbsolutePosition[dir] + pos + math.floor(scrollThumb.AbsoluteSize[dir]/2) <= mouse[dir] then
-					pos = mouse[dir] - scrollThumbFrame.AbsolutePosition[dir] - math.floor(scrollThumb.AbsoluteSize[dir]/2)
-				elseif pos > thumbFrameDist and scrollThumbFrame.AbsolutePosition[dir] + pos + math.floor(scrollThumb.AbsoluteSize[dir]/2) >= mouse[dir] then
-					pos = mouse[dir] - scrollThumbFrame.AbsolutePosition[dir] - math.floor(scrollThumb.AbsoluteSize[dir]/2)
+				local targetCenter = mouse[dir] - scrollThumbFrame.AbsolutePosition[dir] - math.floor(scrollThumb.AbsoluteSize[dir]/2)
+				if (pos < thumbFrameDist and scrollThumbFrame.AbsolutePosition[dir] + pos + math.floor(scrollThumb.AbsoluteSize[dir]/2) <= mouse[dir])
+					or (pos > thumbFrameDist and scrollThumbFrame.AbsolutePosition[dir] + pos + math.floor(scrollThumb.AbsoluteSize[dir]/2) >= mouse[dir]) then
+					pos = targetCenter
 				end
 				newMt:ScrollTo(math.floor(pos/thumbFrameSize*(newMt.TotalSpace-newMt.VisibleSpace)))
 			end
@@ -762,7 +858,8 @@ local ScrollBar do
 		scrollOverlay.Size = UDim2.new(1,0,1,0)
 		scrollOverlay.ScrollBarThickness = 0
 		scrollOverlay.CanvasSize = UDim2.new(0,0,0,0)
-		local scrollOverlayFrame = Instance.new("Frame",scrollOverlay)
+		local scrollOverlayFrame = Instance.new("Frame")
+		scrollOverlayFrame.Parent = scrollOverlay
 		scrollOverlayFrame.BackgroundTransparency = 1
 		scrollOverlayFrame.Size = UDim2.new(1,0,1,0)
 		scrollOverlayFrame.MouseWheelForward:Connect(function()newMt:ScrollTo(newMt.Index - wheelIncrement)end)
@@ -1764,7 +1861,7 @@ function f.removeFromPane(window)
 	for i,v in pairs(RPaneItems) do if v.Window == window then pane = RPaneItems windowIndex = i end end	
 	
 	if pane and #pane > 0 then
-		local weightTop,weightBottom,weightTopN,weightBottomN = 0,0			
+		local weightTop, weightBottom, weightTopN, weightBottomN = 0, 0, 0, 0			
 		
 		for i = windowIndex-1,1,-1 do weightTop = weightTop + pane[i].Proportion end	
 		for i = windowIndex+1,#pane do weightBottom = weightBottom + pane[i].Proportion end	
@@ -2190,7 +2287,8 @@ function f.rightClick()
 	
 	rightClickContext:Add({Name = "Group", Icon = f.icon(nil,iconIndex.GROUP_ICON), DisabledIcon = f.icon(nil,iconIndex.GROUP_D_ICON), Shortcut = "Ctrl+G", Disabled = #selection.List == 0, OnClick = function()
 		local base = selection.List[1]
-		local model = Instance.new("Model",base.Parent)
+		local model = Instance.new("Model")
+		model.Parent = base.Parent
 		model.Name = "Group"
 		for _,v in pairs(selection.List) do
 			v.Parent = model
@@ -2239,12 +2337,31 @@ function f.rightClick()
 		refreshPanels(true)
 	end})
 	
+	-- Clipboard & Path utilities
+	local setClip = setclipboard or toclipboard or (syn and syn.write_clipboard)
+	rightClickContext:Add({Name = "Copy Path", Icon = f.icon(nil,iconIndex.COPY_ICON), DisabledIcon = f.icon(nil,iconIndex.COPY_D_ICON), Shortcut = "Ctrl+Shift+C", Disabled = #selection.List == 0, OnClick = function()
+		local target = selection.List[1]
+		if target and setClip then
+			pcall(setClip, target:GetFullName())
+		end
+		rightClickContext:Hide()
+	end})
+	
+	rightClickContext:Add({Name = "Copy Name", Icon = f.icon(nil,iconIndex.COPY_ICON), DisabledIcon = f.icon(nil,iconIndex.COPY_D_ICON), Shortcut = "", Disabled = #selection.List == 0, OnClick = function()
+		local target = selection.List[1]
+		if target and setClip then
+			pcall(setClip, target.Name)
+		end
+		rightClickContext:Hide()
+	end})
+
 	-- Parts
 	if f.tabIsA(selection.List, "BasePart") or f.tabIsA(selection.List, "Model") then
 		rightClickContext:AddDivider()
 		
 		rightClickContext:Add({Name = "Teleport To", Icon = "", DisabledIcon = "", Shortcut = "", Disabled = #selection.List == 0, OnClick = function()
-			local root = f.getCharacterRoot(Services.Players.LocalPlayer.Character)
+			local player = Services.Players and Services.Players.LocalPlayer
+			local root = player and f.getCharacterRoot(player.Character)
 			if root then
 				for _,v in pairs(selection.List) do
 					local targetPivot = f.getObjectPivot(v)
@@ -2258,7 +2375,8 @@ function f.rightClick()
 		end})
 		
 		rightClickContext:Add({Name = "Teleport Here", Icon = "", DisabledIcon = "", Shortcut = "", Disabled = #selection.List == 0, OnClick = function()
-			local root = f.getCharacterRoot(Services.Players.LocalPlayer.Character)
+			local player = Services.Players and Services.Players.LocalPlayer
+			local root = player and f.getCharacterRoot(player.Character)
 			if root then
 				for _,v in pairs(selection.List) do
 					pcall(function()
@@ -2647,7 +2765,7 @@ function f.addObject(obj,noupdate,recurse)
 					local success,found = pcall(v,obj)
 					if found then
 						explorerTree.SearchResults[obj] = true
-						explorerTree.SearchExpanded[obj] = math.max(explorerTree.SearchExpanded[v] or 0, 1)
+						explorerTree.SearchExpanded[obj] = math.max(explorerTree.SearchExpanded[obj] or 0, 1)
 						local par = obj.Parent
 						while par and ((not explorerTree.SearchResults[par]) or explorerTree.SearchExpanded[par] == 1) do
 							explorerTree.SearchResults[par] = true
@@ -2726,6 +2844,42 @@ function f.indexNodes(obj)
 	
 	for i,v in pairs(game:GetChildren()) do
 		addObject(v,true,true)
+	end
+
+	-- Support Nil Instances if executor provides getnilinstances
+	local getNil = getnilinstances or (syn and syn.get_nil_instances)
+	if getNil and typeof(getNil) == "function" then
+		pcall(function()
+			local nilFolder = Instance.new("Folder")
+			nilFolder.Name = "Nil Instances"
+			nodes[nilFolder] = {
+				Obj = nilFolder,
+				Parent = nodes[game],
+				ExplorerOrder = 1000,
+				Depth = 1,
+				UID = tick()
+			}
+			table.insert(nodes[game], nodes[nilFolder])
+			local nilList = getNil()
+			for _, inst in pairs(nilList) do
+				if typeof(inst) == "Instance" and inst.Parent == nil then
+					pcall(function()
+						local childNode = {
+							Obj = inst,
+							Parent = nodes[nilFolder],
+							ExplorerOrder = f.getRMDOrder(inst.ClassName),
+							Depth = 2,
+							UID = tick()
+						}
+						nodes[inst] = childNode
+						table.insert(nodes[nilFolder], childNode)
+						for _, desc in pairs(inst:GetDescendants()) do
+							addObject(desc, true)
+						end
+					end)
+				end
+			end
+		end)
 	end
 end
 
@@ -2882,7 +3036,8 @@ function f.updateSearch(self)
 	self.SearchResults = results
 end
 
-local textWidthRuler = Instance.new("TextLabel",gui)
+local textWidthRuler = Instance.new("TextLabel")
+textWidthRuler.Parent = gui
 textWidthRuler.Font = Enum.Font.SourceSans
 textWidthRuler.TextSize = 14
 textWidthRuler.Visible = false
@@ -2942,7 +3097,8 @@ function f.icon(frame,index)
 		frame.BackgroundTransparency = 1
 		frame.Size = UDim2.new(0,16,0,16)
 		frame.ClipsDescendants = true
-		local newMap = Instance.new("ImageLabel",frame)
+		local newMap = Instance.new("ImageLabel")
+		newMap.Parent = frame
 		newMap.Name = "Icon"
 		newMap.BackgroundTransparency = 1
 		newMap.Size = UDim2.new(16,0,16,0)
@@ -4042,9 +4198,12 @@ function f.insertObject(className, parentObj)
 		newObject.Name = className
 		if newObject:IsA("BasePart") then
 			newObject.Anchored = true
-			local root = f.getCharacterRoot(Services.Players.LocalPlayer.Character)
+			local player = Services.Players and Services.Players.LocalPlayer
+			local root = player and f.getCharacterRoot(player.Character)
 			if root then
 				newObject.CFrame = root.CFrame * CFrame.new(0, 0, -6)
+			elseif workspace.CurrentCamera then
+				newObject.CFrame = workspace.CurrentCamera.CFrame * CFrame.new(0, 0, -10)
 			end
 		elseif newObject:IsA("Script") or newObject:IsA("LocalScript") then
 			pcall(function()
@@ -4100,14 +4259,25 @@ function f.showInsertMenu(x, y, parentObj)
 end
 
 function f.getScriptSourceObject(obj)
-	if not obj then return nil, nil end
-	local ok, source = pcall(function()
-		return obj.Source
+	if not obj or not obj:IsA("LuaSourceContainer") then return nil, nil end
+	local source = nil
+	local ok = pcall(function()
+		source = obj.Source
 	end)
+	if ok and type(source) == "string" and source ~= "" then
+		return obj, source
+	end
+	local decompiler = decompile or (syn and syn.decompile) or (getgenv and getgenv().decompile)
+	if decompiler and typeof(decompiler) == "function" then
+		local decOk, decResult = pcall(decompiler, obj)
+		if decOk and type(decResult) == "string" and decResult ~= "" then
+			return obj, decResult
+		end
+	end
 	if ok and type(source) == "string" then
 		return obj, source
 	end
-	return nil, nil
+	return obj, "-- [Source could not be read or decompiled on this environment]"
 end
 
 function f.refreshScriptViewerStatus(message, color)
@@ -4588,47 +4758,75 @@ function f.initializeChrome()
 		if gameProcessed then return end
 		if Services.UserInputService:GetFocusedTextBox() then return end
 		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		
+		local ctrl = Services.UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or Services.UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+		local shift = Services.UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or Services.UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		local selection = explorerTree and explorerTree.Selection and explorerTree.Selection.List or {}
+
 		if input.KeyCode == Enum.KeyCode.Delete or input.KeyCode == Enum.KeyCode.Backspace then
 			f.deleteSelection()
+		elseif ctrl and input.KeyCode == Enum.KeyCode.C then
+			if shift and #selection > 0 then
+				local setClip = setclipboard or toclipboard or (syn and syn.write_clipboard)
+				if setClip then pcall(setClip, selection[1]:GetFullName()) end
+			elseif #selection > 0 then
+				clipboard = {}
+				for _, v in pairs(selection) do
+					pcall(function() table.insert(clipboard, v:Clone()) end)
+				end
+			end
+		elseif ctrl and input.KeyCode == Enum.KeyCode.X then
+			if #selection > 0 then
+				clipboard = {}
+				for _, v in pairs(selection) do
+					pcall(function()
+						table.insert(clipboard, v:Clone())
+						v:Destroy()
+					end)
+				end
+				f.refreshDataPanels(true)
+			end
+		elseif ctrl and (input.KeyCode == Enum.KeyCode.V or input.KeyCode == Enum.KeyCode.B) then
+			if #clipboard > 0 and #selection > 0 then
+				for _, v in pairs(selection) do
+					for _, copy in pairs(clipboard) do
+						pcall(function() copy:Clone().Parent = v end)
+					end
+				end
+				f.refreshDataPanels(true)
+			end
+		elseif ctrl and input.KeyCode == Enum.KeyCode.D then
+			if #selection > 0 then
+				for _, v in pairs(selection) do
+					pcall(function() v:Clone().Parent = v.Parent end)
+				end
+				f.refreshDataPanels(true)
+			end
+		elseif (input.KeyCode == Enum.KeyCode.F2 or (ctrl and input.KeyCode == Enum.KeyCode.R)) and #selection > 0 then
+			task.defer(function()
+				f.startInlineRename(selection[1])
+			end)
+		elseif ctrl and input.KeyCode == Enum.KeyCode.G and #selection > 0 then
+			local base = selection[1]
+			local model = Instance.new("Model")
+			model.Name = "Group"
+			model.Parent = base.Parent
+			for _, v in pairs(selection) do
+				pcall(function() v.Parent = model end)
+			end
+			f.focusObject(model)
+		elseif ctrl and input.KeyCode == Enum.KeyCode.U and f.tabIsA(selection, "Model") then
+			for _, v in pairs(selection) do
+				if v:IsA("Model") then
+					for _, child in pairs(v:GetChildren()) do
+						child.Parent = v.Parent
+					end
+					v:Destroy()
+				end
+			end
+			f.refreshDataPanels(true)
 		end
 	end)
-end
-
-local Selection do
-	Selection = {
-		List = {},
-		Selected = {}
-	}
-	
-	function Selection:Add(obj)
-		if Selection.Selected[obj] then return end
-		
-		Selection.Selected[obj] = true
-		table.insert(Selection.List,obj)
-	end
-	
-	function Selection:Set(objs)
-		for i,v in pairs(Selection.List) do
-			Selection.Selected[v] = nil
-		end
-		Selection.List = {}
-		
-		for i,v in pairs(objs) do
-			if not Selection.Selected[v] then
-				Selection.Selected[v] = true
-				table.insert(Selection.List,v)
-			end
-		end
-	end
-	
-	function Selection:Remove(obj)
-		if not Selection.Selected[obj] then return end
-		
-		Selection.Selected[obj] = false
-		for i,v in pairs(Selection.List) do
-			if v == obj then table.remove(Selection.List,i) break end
-		end
-	end
 end
 
 function f.refreshExplorers(id)
@@ -4644,9 +4842,98 @@ end
 -- Properties Functions
 
 function f.toValue(str,valueType)
-	if valueType == "int" or valueType == "float" or valueType == "double" then
-		return tonumber(str)
+	if str == nil then return nil end
+	local trimmed = tostring(str):match("^%s*(.-)%s*$")
+	local vType = string.lower(valueType or "")
+
+	if vType == "int" or vType == "int32" or vType == "int64" or vType == "float" or vType == "double" or vType == "number" then
+		return tonumber(trimmed)
+	elseif vType == "string" or vType == "content" then
+		return trimmed
+	elseif vType == "bool" or vType == "boolean" then
+		local l = string.lower(trimmed)
+		if l == "true" or l == "1" or l == "yes" or l == "on" then
+			return true
+		elseif l == "false" or l == "0" or l == "no" or l == "off" then
+			return false
+		end
+		return nil
+	elseif vType == "vector3" then
+		local nums = {}
+		for n in string.gmatch(trimmed, "[-+]?%d*%.?%d+(?:[eE][-+]?%d+)?") do
+			table.insert(nums, tonumber(n))
+		end
+		if #nums >= 3 then
+			return Vector3.new(nums[1], nums[2], nums[3])
+		end
+	elseif vType == "vector2" then
+		local nums = {}
+		for n in string.gmatch(trimmed, "[-+]?%d*%.?%d+(?:[eE][-+]?%d+)?") do
+			table.insert(nums, tonumber(n))
+		end
+		if #nums >= 2 then
+			return Vector2.new(nums[1], nums[2])
+		end
+	elseif vType == "color3" then
+		local hex = string.match(trimmed, "^#?([0-9a-fA-F]{6})$")
+		if hex then
+			local r = tonumber(string.sub(hex, 1, 2), 16)
+			local g = tonumber(string.sub(hex, 3, 4), 16)
+			local b = tonumber(string.sub(hex, 5, 6), 16)
+			return Color3.fromRGB(r, g, b)
+		end
+		local nums = {}
+		for n in string.gmatch(trimmed, "[-+]?%d*%.?%d+") do
+			table.insert(nums, tonumber(n))
+		end
+		if #nums >= 3 then
+			if nums[1] > 1 or nums[2] > 1 or nums[3] > 1 then
+				return Color3.fromRGB(math.clamp(nums[1], 0, 255), math.clamp(nums[2], 0, 255), math.clamp(nums[3], 0, 255))
+			else
+				return Color3.new(math.clamp(nums[1], 0, 1), math.clamp(nums[2], 0, 1), math.clamp(nums[3], 0, 1))
+			end
+		end
+	elseif vType == "brickcolor" then
+		local ok, bc = pcall(function() return BrickColor.new(trimmed) end)
+		if ok and bc then return bc end
+	elseif vType == "udim2" then
+		local nums = {}
+		for n in string.gmatch(trimmed, "[-+]?%d*%.?%d+") do
+			table.insert(nums, tonumber(n))
+		end
+		if #nums >= 4 then
+			return UDim2.new(nums[1], nums[2], nums[3], nums[4])
+		end
+	elseif vType == "udim" then
+		local nums = {}
+		for n in string.gmatch(trimmed, "[-+]?%d*%.?%d+") do
+			table.insert(nums, tonumber(n))
+		end
+		if #nums >= 2 then
+			return UDim.new(nums[1], nums[2])
+		end
+	elseif vType == "cframe" or vType == "coordinateframe" then
+		local nums = {}
+		for n in string.gmatch(trimmed, "[-+]?%d*%.?%d+(?:[eE][-+]?%d+)?") do
+			table.insert(nums, tonumber(n))
+		end
+		if #nums >= 12 then
+			return CFrame.new(unpack(nums))
+		elseif #nums >= 3 then
+			return CFrame.new(nums[1], nums[2], nums[3])
+		end
+	elseif vType == "numberrange" then
+		local nums = {}
+		for n in string.gmatch(trimmed, "[-+]?%d*%.?%d+") do
+			table.insert(nums, tonumber(n))
+		end
+		if #nums >= 2 then
+			return NumberRange.new(nums[1], nums[2])
+		elseif #nums == 1 then
+			return NumberRange.new(nums[1])
+		end
 	end
+	return nil
 end
 
 function f.childValue(prop,value,obj)
@@ -4673,11 +4960,11 @@ end
 
 function f.setProp(prop,str,child)
 	local value = f.toValue(str,prop.ValueType)
-	if value then
+	if value ~= nil then
 		for i,v in pairs(explorerTree.Selection.List) do
 			pcall(function()
 				if v:IsA(prop.Class) then
-					if #child == 0 then
+					if not child or #child == 0 then
 						v[prop.Name] = value
 					else
 						v[prop.ParentProp.Name] = f.childValue(prop,value,v)
@@ -4959,6 +5246,7 @@ function f.updatePropTree(self)
 			table.insert(newTree,v)
 			if v.Control.Children and self.Expanded[v.RefName] then
 				for _,child in pairs(v.Control.Children) do
+					child.Obj = v.Obj
 					table.insert(newTree,child)
 				end
 			end
@@ -5045,10 +5333,17 @@ function f.newProperties()
 		if not node.Category then
 			-- Update property controls
 			node.Control:Setup(entry.Indent.Control)
-			if node.Depth > 1 then
-				--node.Control:Update(node.Obj[node.Prop.ParentName][node.Prop.Name])
-			else
-				node.Control:Update(node.Obj[node.Prop.Name])
+			if node.Depth > 1 and node.Obj and node.Prop.ParentProp then
+				pcall(function()
+					local parentVal = node.Obj[node.Prop.ParentProp.Name]
+					if parentVal ~= nil then
+						node.Control:Update(parentVal[node.Prop.Name])
+					end
+				end)
+			elseif node.Obj then
+				pcall(function()
+					node.Control:Update(node.Obj[node.Prop.Name])
+				end)
 			end
 		
 			-- Color switching
@@ -5375,11 +5670,22 @@ function f.newScriptViewer()
 		Name = "PathLabel",
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0,10,0,8),
-		Size = UDim2.new(1,-216,0,18),
+		Size = UDim2.new(1,-252,0,18),
 		Text = "Select a Script, LocalScript, or ModuleScript to inspect source.",
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Center,
 		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = body
+	})
+	local copyButton = CreateInstance("TextButton",{
+		Name = "CopyButton",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1,0),
+		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1,-58,0,6),
+		Size = UDim2.new(0,50,0,22),
+		Text = "Copy",
 		Parent = body
 	})
 	local reloadButton = CreateInstance("TextButton",{
@@ -5388,8 +5694,8 @@ function f.newScriptViewer()
 		AnchorPoint = Vector2.new(1,0),
 		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
 		BorderSizePixel = 0,
-		Position = UDim2.new(1,-156,0,6),
-		Size = UDim2.new(0,54,0,22),
+		Position = UDim2.new(1,-112,0,6),
+		Size = UDim2.new(0,52,0,22),
 		Text = "Reload",
 		Parent = body
 	})
@@ -5399,8 +5705,8 @@ function f.newScriptViewer()
 		AnchorPoint = Vector2.new(1,0),
 		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
 		BorderSizePixel = 0,
-		Position = UDim2.new(1,-72,0,6),
-		Size = UDim2.new(0,80,0,22),
+		Position = UDim2.new(1,-168,0,6),
+		Size = UDim2.new(0,74,0,22),
 		Text = "Follow: On",
 		Parent = body
 	})
@@ -5411,7 +5717,7 @@ function f.newScriptViewer()
 		BackgroundColor3 = BrandConfig.Theme.PanelRaised,
 		BorderSizePixel = 0,
 		Position = UDim2.new(1,-4,0,6),
-		Size = UDim2.new(0,56,0,22),
+		Size = UDim2.new(0,50,0,22),
 		Text = "Save",
 		Parent = body
 	})
@@ -5443,7 +5749,7 @@ function f.newScriptViewer()
 	scrollThemeCallbacks.ScriptViewerTheme = function()
 		body.BackgroundColor3 = BrandConfig.Theme.PanelAlt
 		styleText(pathLabel, BrandConfig.Fonts.Mono, 12, BrandConfig.Theme.TextSoft)
-		for _,button in ipairs({reloadButton, followButton, saveButton}) do
+		for _,button in ipairs({copyButton, reloadButton, followButton, saveButton}) do
 			button.BackgroundColor3 = BrandConfig.Theme.PanelRaised
 			ensureUICorner(button, BrandConfig.Radii.Small)
 			ensureUIStroke(button, "ThemeStroke", BrandConfig.Theme.StrokeSoft, 0.08, 1)
@@ -5461,6 +5767,15 @@ function f.newScriptViewer()
 	f.hookWindowListener(newgui)
 	newgui.TopBar.Settings.MouseButton1Click:Connect(function()
 		f.showPanelMenu(newgui)
+	end)
+	copyButton.MouseButton1Click:Connect(function()
+		local setClip = setclipboard or toclipboard or (syn and syn.write_clipboard)
+		if setClip and editor.Text ~= "" then
+			pcall(setClip, editor.Text)
+			f.refreshScriptViewerStatus("Copied to clipboard.", BrandConfig.Theme.Success)
+		else
+			f.refreshScriptViewerStatus("Clipboard not available.", BrandConfig.Theme.Danger)
+		end
 	end)
 	reloadButton.MouseButton1Click:Connect(function()
 		scriptViewerState.Dirty = false
@@ -5509,7 +5824,8 @@ function f.newConsolePanel()
 		ScrollBarThickness = 6,
 		Parent = body
 	})
-	local listLayout = Instance.new("UIListLayout", outputScroll)
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Parent = outputScroll
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	listLayout.Padding = UDim.new(0, 2)
 	
@@ -5598,9 +5914,25 @@ function f.newConsolePanel()
 			local code = commandLine.Text
 			commandLine.Text = ""
 			addLog("> "..code, Enum.MessageType.MessageOutput)
-			local func, err = loadstring(code)
+			local ls = loadstring or (getgenv and getgenv().loadstring)
+			if not ls then
+				addLog("loadstring is not supported on this environment.", Enum.MessageType.MessageError)
+				return
+			end
+			local func, err = ls(code)
 			if func then
 				task.spawn(function()
+					if setfenv and getfenv then
+						pcall(function()
+							local env = getfenv(func)
+							local sel = explorerTree and explorerTree.Selection and explorerTree.Selection.List or {}
+							env.selected = sel[1]
+							env.selection = sel
+							env.dex = f
+							env.gui = gui
+							setfenv(func, env)
+						end)
+					end
 					local success, execErr = pcall(func)
 					if not success then
 						addLog(tostring(execErr), Enum.MessageType.MessageError)
@@ -5768,12 +6100,55 @@ function f.newSaveInstancePanel()
 		status.Text = "Saving game... please wait."
 		status.TextColor3 = BrandConfig.Theme.AccentOrange
 		task.spawn(function()
-			local ok, err = pcall(function()
-				if saveinstance then
-					saveinstance(settingsData)
-				else
-					error("saveinstance is not supported by your executor.")
+			local saveFunc = nil
+			if typeof(saveinstance) == "function" then
+				saveFunc = saveinstance
+			elseif typeof(save_instance) == "function" then
+				saveFunc = save_instance
+			elseif syn and typeof(syn.saveinstance) == "function" then
+				saveFunc = syn.saveinstance
+			elseif syn and typeof(syn.save_instance) == "function" then
+				saveFunc = syn.save_instance
+			elseif getgenv then
+				local genv = getgenv()
+				if typeof(genv.saveinstance) == "function" then
+					saveFunc = genv.saveinstance
+				elseif typeof(genv.save_instance) == "function" then
+					saveFunc = genv.save_instance
 				end
+			end
+
+			if not saveFunc and (loadstring and (pcall(function() return game.HttpGet end) or request)) then
+				status.Text = "Fetching universal saveinstance..."
+				local get = function(url)
+					local okGet, res = pcall(function() local hg = game["HttpGet"] return hg and hg(game, url) end)
+					if okGet and res then return res end
+					if request then
+						local okReq, reqRes = pcall(request, {Url = url, Method = "GET"})
+						if okReq and reqRes and reqRes.Body then return reqRes.Body end
+					end
+					return nil
+				end
+				local fetchedCode = get("https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau")
+				if fetchedCode then
+					local ls = loadstring or (getgenv and getgenv().loadstring)
+					local okFetch, fetched = pcall(function()
+						return ls(fetchedCode)()
+					end)
+					if okFetch and typeof(fetched) == "function" then
+						saveFunc = fetched
+					end
+				end
+			end
+
+			if not saveFunc then
+				status.Text = "Save failed: saveinstance not supported on this executor."
+				status.TextColor3 = BrandConfig.Theme.Danger
+				return
+			end
+
+			local ok, err = pcall(function()
+				saveFunc(settingsData)
 			end)
 			if ok then
 				status.Text = "Game saved successfully."
@@ -5821,12 +6196,10 @@ local function welcomePlayer()
 	end
 end
 
-mouse.Move:Connect(function()
+local function updateMousePosition(x, y)
 	if not gui or not gui.Parent then
 		return
 	end
-	local x,y = mouse.X,mouse.Y
-	
 	if x <= 50 then
 		setPane = "Left"
 	elseif x >= gui.AbsoluteSize.X - 50 then
@@ -5835,7 +6208,21 @@ mouse.Move:Connect(function()
 		setPane = "None"
 	end
 	f.updateDockHints()
-end)
+end
+
+if mouse then
+	mouse.Move:Connect(function()
+		updateMousePosition(mouse.X, mouse.Y)
+	end)
+end
+
+if Services.UserInputService then
+	Services.UserInputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			updateMousePosition(input.Position.X, input.Position.Y)
+		end
+	end)
+end
 
 explorerPanel = f.newExplorer()
 propertiesPanel = f.newProperties()
