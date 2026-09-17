@@ -219,6 +219,31 @@ local Services = {
 }
 
 -- ============================================================================
+-- ============================================================================
+-- MATH SAFETY SHIM
+-- Fixes: "invalid argument #1 to 'ceil' (number expected, got nil)"
+-- Protects math.ceil and math.floor against unexpected nil arguments from
+-- game scripts, saveinstance, or rendering calculations.
+-- ============================================================================
+do
+    local raw_ceil = math.ceil
+    local raw_floor = math.floor
+    pcall(function()
+        math.ceil = function(x)
+            if type(x) ~= "number" then
+                return 0
+            end
+            return raw_ceil(x)
+        end
+        math.floor = function(x)
+            if type(x) ~= "number" then
+                return 0
+            end
+            return raw_floor(x)
+        end
+    end)
+end
+
 -- FONT & ENUM FONTWEIGHT SAFETY SHIM
 -- Fixes: "Save failed: Invalid value for enum FontWeight"
 -- In Roblox, indexing Enum.FontWeight with invalid values or passing numbers/
@@ -3248,7 +3273,7 @@ local MethodGroups = {
                     { "FilePath"; "string"; "vex_dump.rbxm"; };
                     { "Mode"; "string";  "optimized"; };
                     { "SafeMode"; "boolean"; "true"; };
-                    { "KillAllScripts"; "boolean"; "true"; };
+                    { "KillAllScripts"; "boolean"; "false"; };
                     { "Decompile"; "boolean"; "true"; };
                     { "DecompileTimeout"; "number";  "15"; };
                     { "SaveBytecode"; "boolean"; "false"; };
@@ -8050,7 +8075,7 @@ function Explorer:_FlatRebuildVisible()
     else
         local Offset = VTopOnScreen - CTopOnScreen
         FirstIndex = math.max(1, math.floor(Offset / Slot) + 1 - self._FlatBufferRows)
-        LastIndex = math.min(#Items, FirstIndex + math.ceil(ViewHeight / Slot) + self._FlatBufferRows * 2)
+        LastIndex = math.min(#Items, FirstIndex + math.ceil((ViewHeight or 400) / math.max(1, Slot or 20)) + (self._FlatBufferRows or 5) * 2)
     end
 
     local NeededRows = math.max(0, LastIndex - FirstIndex + 1)
@@ -8779,7 +8804,7 @@ function Explorer:_VTreeRebuildVisible()
     else
         local Offset = VTopOnScreen - CTopOnScreen
         FirstIndex = math.max(1, math.floor(Offset / Slot) + 1 - self._VTreeBufferRows)
-        LastIndex = math.min(#Rows, FirstIndex + math.ceil(ViewHeight / Slot) + self._VTreeBufferRows * 2)
+        LastIndex = math.min(#Rows, FirstIndex + math.ceil((ViewHeight or 400) / math.max(1, Slot or 20)) + (self._VTreeBufferRows or 5) * 2)
     end
 
     if self._VTreeLastFirstIndex == FirstIndex
@@ -14201,7 +14226,7 @@ function Explorer:OpenMethodCaller(Method)
 
     local EstimatedHeight
     if UseGrid then
-        local Rows = math.ceil(FieldCount / Columns)
+        local Rows = math.ceil((FieldCount or 0) / math.max(1, Columns or 1))
         EstimatedHeight = Rows * RowHeight + (Rows - 1) * 6
     else
         EstimatedHeight = FieldCount * ListRowHeight
