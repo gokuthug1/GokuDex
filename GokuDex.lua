@@ -6,6 +6,21 @@
 	Native support across all executors with offline API reflection.
 ]]
 
+local function getGlobal(name)
+	local ok, val = pcall(function()
+		if getgenv and getgenv()[name] ~= nil then return getgenv()[name] end
+		local genv = (getfenv and getfenv())
+		if genv and genv[name] ~= nil then return genv[name] end
+		if rawget and getfenv and rawget(getfenv(), name) ~= nil then return rawget(getfenv(), name) end
+		if _G and _G[name] ~= nil then return _G[name] end
+		return nil
+	end)
+	return ok and val or nil
+end
+
+local nativeDecompile = getGlobal("decompile") or (syn and syn.decompile)
+local nativeSaveInstance = getGlobal("saveinstance") or getGlobal("save_instance") or (syn and syn.saveinstance) or (syn and syn.save_instance)
+
 -- ============================================================================
 -- MATH SAFETY SHIM
 -- Fixes: "invalid argument #1 to 'ceil' (number expected, got nil)"
@@ -14670,36 +14685,48 @@ Main = (function()
 		env.makefolder = makefolder
 		env.listfiles = listfiles
 		env.loadfile = loadfile
-		env.saveinstance = saveinstance or (function()
-			--warn("No built-in saveinstance exists, using SynSaveInstance and wrapper...")
-			if game:GetService("RunService"):IsStudio() then return function() error("Cannot run in Roblox Studio!") end end
-			local Params = {
-				RepoURL = "https://raw.githubusercontent.com/luau/UniversalSynSaveInstance/main/",
-				SSI = "saveinstance",
-			}
-			local sOk, synsaveinstance = pcall(function()
-				local code = oldgame:HttpGet(Params.RepoURL .. Params.SSI .. ".luau", true)
-				return loadstring(code, Params.SSI)()
-			end)
-			if not sOk or type(synsaveinstance) ~= "function" then
-				synsaveinstance = function(options)
-					warn("[GokuDex] saveinstance: SynSaveInstance unavailable or offline")
-				end
-			end
-		
-			local function wrappedsaveinstance(obj, filepath, options)
-				options = options or {}
+		env.saveinstance = function(obj, filepath, options)
+			options = options or {}
+			if type(filepath) == "string" and filepath ~= "" then
 				options["FilePath"] = filepath
-				options["Object"] = obj
-				options["KillAllScripts"] = false
-				options["SafeMode"] = true
-				local ok, res = pcall(synsaveinstance, options)
-				return ok and res or false
 			end
-			
-			if getgenv then pcall(function() getgenv().saveinstance = wrappedsaveinstance end) end
-			return wrappedsaveinstance
-		end)()
+			if typeof(obj) == "Instance" then
+				options["Object"] = obj
+			end
+			options["KillAllScripts"] = false
+			options["SafeMode"] = true
+
+			-- 1. Try executor native saveinstance first (same as old GokuDex)
+			local nativeSave = nativeSaveInstance or (getgenv and (getgenv().saveinstance or getgenv().save_instance)) or (syn and (syn.saveinstance or syn.save_instance))
+			if typeof(nativeSave) == "function" then
+				local ok, res = pcall(function()
+					return nativeSave(options)
+				end)
+				if ok and res ~= false then return true, res end
+				
+				local ok2, res2 = pcall(function()
+					return nativeSave(obj, options)
+				end)
+				if ok2 and res2 ~= false then return true, res2 end
+
+				local ok3, res3 = pcall(function()
+					return nativeSave(obj, filepath, options)
+				end)
+				if ok3 and res3 ~= false then return true, res3 end
+			end
+
+			-- 2. Fallback to SynSaveInstance (same repository as old GokuDex)
+			local sOk, synsaveinstance = pcall(function()
+				local code = oldgame:HttpGet("https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau", true)
+				return loadstring(code, "saveinstance")()
+			end)
+			if sOk and typeof(synsaveinstance) == "function" then
+				local ok, res = pcall(synsaveinstance, options)
+				return ok, res
+			end
+
+			return false, "No working saveinstance found on this executor."
+		end
 		
 		env.parsefile = function(name)
 			return tostring(name):gsub("[*\\?:<>|]+", ""):sub(1, 175)
@@ -14739,11 +14766,13 @@ Main = (function()
 		env.request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
 		
 		env.isdecompile = function()
-			return typeof(decompile) == "function" or typeof(getscriptbytecode) == "function" or false
+			local dec = nativeDecompile or (getgenv and getgenv().decompile) or (syn and syn.decompile) or decompile
+			return typeof(dec) == "function" or typeof(getscriptbytecode) == "function" or false
 		end
 		
 		env.isdecompilefallback = function()
-			return typeof(decompile) ~= "function" or typeof(getscriptbytecode) == "function" or false
+			local dec = nativeDecompile or (getgenv and getgenv().decompile) or (syn and syn.decompile) or decompile
+			return typeof(dec) ~= "function"
 		end
 		
 		
@@ -14819,20 +14848,36 @@ Main = (function()
 				}
 			).Body
 		end
-		env.decompile = function(...)
-			if typeof(decompile) == "function" and Settings.Decompiler.PreferDecompilerFallback == false then
-				return decompile(...)
-			elseif typeof(getscriptbytecode) == "function" then
-				local fallbackMode = Settings.Decompiler.DecompilerFallback
-				
-				if fallbackMode == "Konstant" then
-					return KonstantDec(...)
-				elseif fallbackMode == "AdvancedDecompiler" then
-					return ADDec(...)
-				elseif  fallbackMode == "Shiny" then
-					return ShinyDec(...)
+		env.decompile = function(script_instance, ...)
+			local dec = nativeDecompile or (getgenv and getgenv().decompile) or (syn and syn.decompile)
+			if typeof(dec) == "function" and Settings.Decompiler.PreferDecompilerFallback == false then
+				local ok, res = pcall(dec, script_instance, ...)
+				if ok and type(res) == "string" and #res > 0 and not res:find("Failed to decode Luau bytecode") then
+					return res
 				end
 			end
+			-- Fallback 1: try reading script .Source directly
+			if script_instance and typeof(script_instance) == "Instance" then
+				local okSrc, src = pcall(function() return script_instance.Source end)
+				if okSrc and src and type(src) == "string" and #src > 0 then
+					return src
+				end
+			end
+			-- Fallback 2: only use bytecode services if fallback is explicitly requested
+			if typeof(getscriptbytecode) == "function" and Settings.Decompiler.PreferDecompilerFallback == true then
+				local fallbackMode = Settings.Decompiler.DecompilerFallback
+				if fallbackMode == "Konstant" then
+					local okK, resK = pcall(KonstantDec, script_instance, ...)
+					if okK and type(resK) == "string" and not resK:find("Failed to decode Luau bytecode") then
+						return resK
+					end
+				elseif fallbackMode == "AdvancedDecompiler" then
+					return ADDec(script_instance, ...)
+				elseif fallbackMode == "Shiny" then
+					return ShinyDec(script_instance, ...)
+				end
+			end
+			return "-- [Decompilation failed or not supported on this script]"
 		end
 		
 		--[[if Main.Elevated then
