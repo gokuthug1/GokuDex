@@ -153,7 +153,7 @@ local function main()
 
 	-- StarterGui.ScreenGui
 	window = Lib.Window.new()
-	window:SetTitle("Console")
+	window:SetTitle("GokuDex - Console")
 	window:Resize(500,400)
 	Console.Window = window
 
@@ -2412,7 +2412,7 @@ local function main()
 			for _, v in next, selection.List do
 				if v.Obj:IsA("LuaSourceContainer") and env.isViableDecompileScript(v.Obj) then
 					local success, source = pcall(env.decompile, v.Obj)
-					if not success or not source then source = ("-- DEX - %s failed to decompile %s"):format(env.executor, v.Obj.ClassName) end
+					if not success or not source then source = ("-- GokuDex - %s failed to decompile %s"):format(env.executor, v.Obj.ClassName) end
 					local fileName = ("%s_%s_%i_Source.txt"):format(env.parsefile(v.Obj.Name), v.Obj.ClassName, game.PlaceId)
 					--env.writefile(fileName, source)
 					Lib.SaveAsPrompt(fileName, source)
@@ -3424,7 +3424,7 @@ return search]==]
 
 		local window = Lib.Window.new()
 		Explorer.Window = window
-		window:SetTitle("Explorer")
+		window:SetTitle("GokuDex - Explorer")
 		window.GuiElems.Line.Position = UDim2.new(0,0,0,22)
 
 		Explorer.InitEntryTemplate()
@@ -10861,7 +10861,7 @@ local function main()
 			viewportFrame:ClearAllChildren()
 			
 			ModelViewer.IsViewing = false
-			window:SetTitle("3D Preview")
+			window:SetTitle("GokuDex - 3D Preview")
 			pathLabel.Gui.Text = ""
 		end
 	end
@@ -13047,7 +13047,7 @@ local function main()
 		-- Init window
 		window = Lib.Window.new()
 		Properties.Window = window
-		window:SetTitle("Properties")
+		window:SetTitle("GokuDex - Properties")
 
 		toolBar = guiItems.ToolBar
 		propsFrame = guiItems.List
@@ -13249,7 +13249,7 @@ local function main()
 	
 	SaveInstance.Init = function()
 		window = Lib.Window.new()
-		window:SetTitle("Save Instance")
+		window:SetTitle("GokuDex - Save Instance")
 		window:Resize(350,350)
 		SaveInstance.Window = window
 		
@@ -13565,7 +13565,7 @@ local function main()
 
 	ScriptViewer.Init = function()
 		window = Lib.Window.new()
-		window:SetTitle("Notepad")
+		window:SetTitle("GokuDex - Notebook")
 		window:Resize(500,400)
 		ScriptViewer.Window = window
 
@@ -13966,7 +13966,7 @@ local function main()
 	
 	SettingsWindow.Init = function()
 		window = Lib.Window.new()
-		window:SetTitle("Settings")
+		window:SetTitle("GokuDex - Settings")
 		window:Resize(250,375)
 		SettingsWindow.Window = window
 		
@@ -14333,7 +14333,7 @@ Main = (function()
 	Main.Apps = Apps
 	Main.MenuApps = {}
 	Main.GitName = "AZYsGithub"
-	Main.RepoName = "DexPlusPlus"
+	Main.RepoName = "GokuDex"
 	Main.GitRepoName = Main.GitName.."/"..Main.RepoName
 
 	Main.DisplayOrders = {
@@ -14437,7 +14437,7 @@ Main = (function()
 	end
 	
 	Main.SecureGui = function(gui)
-		gui.Name = "_DPP_".. Main.GetRandomString()
+		gui.Name = "_GOKUDEX_".. Main.GetRandomString()
 		local parented = false
 		if gethui then
 			local ok = pcall(function() gui.Parent = gethui() end)
@@ -14485,7 +14485,7 @@ Main = (function()
 
 	Main.Error = function(str)
 		if rconsoleprint then
-			rconsoleprint("DEX ERROR: "..tostring(str).."\n")
+			rconsoleprint("GOKUDEX ERROR: "..tostring(str).."\n")
 			wait(9e9)
 		else
 			error(str)
@@ -14830,7 +14830,7 @@ Main = (function()
 			t.TextColor3 = Color3.new(1,1,1)
 			t.TextWrapped = true
 			t.TextScaled = true
-			t.Text = "\n\n\n\n\n\n\n\nHello Skidsploit user,\nZinnia, Chillz and the Secret Service does not approve of Dex being used on your skidsploit.\nPlease consider getting something better.\n\nIncompatible Reason: "..reason.."\n\n\n\n\n\n\n\n"
+			t.Text = "\n\n\n\n\n\n\n\n[GokuDex Incompatible]\nYour executor does not support necessary functions for GokuDex.\nIncompatible Reason: "..reason.."\n\n\n\n\n\n\n\n"
 			
 			-- This sound wont work!!!
 			local sound = Instance.new("Sound",msg)
@@ -14932,7 +14932,8 @@ Main = (function()
 	--warn(Main.ExportSettings())
 
 	Main.LoadSettings = function()
-		local s, data = pcall(env.readfile or error, "DexPlusPlusSettings.json")
+		local s, data = pcall(env.readfile or error, "GokuDexSettings.json")
+		if not s then s, data = pcall(env.readfile or error, "DexPlusPlusSettings.json") end
 		if s and data and data ~= "" then
 			
 			local s, decoded = pcall(service.HttpService.JSONDecode, service.HttpService, data)
@@ -15279,13 +15280,13 @@ Main = (function()
 			{2,"Frame",{Active=true,BackgroundColor3=Color3.new(0.20392157137394,0.20392157137394,0.20392157137394),BorderSizePixel=0,Name="Main",Parent={1},Position=UDim2.new(0.5,-175,0.5,-100),Size=UDim2.new(0,350,0,200),}},
 			{3,"Frame",{BackgroundColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),BorderSizePixel=0,ClipsDescendants=true,Name="Holder",Parent={2},Size=UDim2.new(1,0,1,0),}},
 			{4,"UIGradient",{Parent={3},Rotation=30,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1,0),NumberSequenceKeypoint.new(1,1,0),}),}},
-			{5,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=4,Name="Title",Parent={3},Position=UDim2.new(0,-190,0,15),Size=UDim2.new(0,100,0,50),Text="Dex++",TextColor3=Color3.new(1,1,1),TextSize=50,TextTransparency=1,}},
+			{5,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=4,Name="Title",Parent={3},Position=UDim2.new(0,-190,0,15),Size=UDim2.new(0,160,0,50),Text="GokuDex",TextColor3=Color3.fromRGB(255,152,38),TextSize=50,TextTransparency=1,}},
 			{6,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=3,Name="Desc",Parent={3},Position=UDim2.new(0,-230,0,60),Size=UDim2.new(0,180,0,25),Text="Ultimate Debugging Suite",TextColor3=Color3.new(1,1,1),TextSize=18,TextTransparency=1,}},
 			{7,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=3,Name="StatusText",Parent={3},Position=UDim2.new(0,20,0,110),Size=UDim2.new(0,180,0,25),Text="Fetching API",TextColor3=Color3.new(1,1,1),TextSize=14,TextTransparency=1,}},
 			{8,"Frame",{BackgroundColor3=Color3.new(0.20392157137394,0.20392157137394,0.20392157137394),BorderSizePixel=0,Name="ProgressBar",Parent={3},Position=UDim2.new(0,110,0,145),Size=UDim2.new(0,0,0,4),}},
 			{9,"Frame",{BackgroundColor3=Color3.new(0.2392156869173,0.56078433990479,0.86274510622025),BorderSizePixel=0,Name="Bar",Parent={8},Size=UDim2.new(0,0,1,0),}},
 			{10,"ImageLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Image="rbxassetid://2764171053",ImageColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),Parent={8},ScaleType=1,Size=UDim2.new(1,0,1,0),SliceCenter=Rect.new(2,2,254,254),}},
-			{11,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=3,Name="Creator",Parent={2},Position=UDim2.new(1,-110,1,-20),Size=UDim2.new(0,105,0,20),Text="Developed by Chillz.",TextColor3=Color3.new(1,1,1),TextSize=14,TextXAlignment=1,}},
+			{11,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=3,Name="Creator",Parent={2},Position=UDim2.new(1,-170,1,-20),Size=UDim2.new(0,165,0,20),Text="Created by gokuthug1",TextColor3=Color3.fromRGB(77,172,255),TextSize=14,TextXAlignment=1,}},
 			{12,"UIGradient",{Parent={11},Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1,0),NumberSequenceKeypoint.new(1,1,0),}),}},
 			{13,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=3,Name="Version",Parent={2},Position=UDim2.new(1,-110,1,-35),Size=UDim2.new(0,105,0,20),Text=Main.Version,TextColor3=Color3.new(1,1,1),TextSize=14,TextXAlignment=1,}},
 			{14,"UIGradient",{Parent={13},Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1,0),NumberSequenceKeypoint.new(1,1,0),}),}},
@@ -15516,7 +15517,7 @@ Main = (function()
 	Main.SetMainGuiOpen = function(val)
 		Main.MainGuiOpen = val
 
-		Main.MainGui.OpenButton.Text = val and "Close" or "Dex++"
+		Main.MainGui.OpenButton.Text = val and "Close" or "GokuDex"
 		if val then Main.MainGui.OpenButton.MainFrame.Visible = true end
 		Main.MainGui.OpenButton.MainFrame:TweenSize(val and UDim2.new(0,224,0,200) or UDim2.new(0,0,0,0),Enum.EasingDirection.Out,Enum.EasingStyle.Quad,0.2,true)
 		--Main.MainGui.OpenButton.BackgroundTransparency = val and 0 or (Lib.CheckMouseInGui(Main.MainGui.OpenButton) and 0 or 0.2)
@@ -15544,7 +15545,7 @@ Main = (function()
 	Main.CreateMainGui = function()
 		local gui = create({
 			{1,"ScreenGui",{IgnoreGuiInset=true,Name="MainMenu",}},
-			{2,"TextButton",{AnchorPoint=Vector2.new(0.5,0),AutoButtonColor=false,BackgroundColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),BorderSizePixel=0,Font=4,Name="OpenButton",Parent={1},Position=UDim2.new(0.5,0,0,2),Size=UDim2.new(0,55,0,32),Text="Dex++",TextColor3=Color3.new(1,1,1),TextSize=16,TextTransparency=0.20000000298023,}},
+			{2,"TextButton",{AnchorPoint=Vector2.new(0.5,0),AutoButtonColor=false,BackgroundColor3=Color3.new(0.13,0.15,0.20),BorderSizePixel=0,Font=4,Name="OpenButton",Parent={1},Position=UDim2.new(0.5,0,0,2),Size=UDim2.new(0,85,0,32),Text="GokuDex",TextColor3=Color3.fromRGB(255,152,38),TextSize=15,TextTransparency=0.1,}},
 			{3,"UICorner",{CornerRadius=UDim.new(0,4),Parent={2},}},
 			{4,"Frame",{AnchorPoint=Vector2.new(0.5,0),BackgroundColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),ClipsDescendants=true,Name="MainFrame",Parent={2},Position=UDim2.new(0.5,0,1,-4),Size=UDim2.new(0,224,0,200),}},
 			{5,"UICorner",{CornerRadius=UDim.new(0,4),Parent={4},}},
@@ -15607,10 +15608,11 @@ Main = (function()
 		openButton.MainFrame.BottomFrame.Information.MouseButton1Click:Connect(function()
 			local duration = 1
 			local Infos = {
-				"Contributors >>",
-				"Toon (IY Dex and PRs)",
-				"Moon (Dex)",
-				"Cazan (3D Preview)",
+				"GokuDex Ultimate",
+				"Remastered by gokuthug1",
+				"Aura-charged Roblox explorer",
+				"Based on Dex++ by Chillz",
+				"Moon (Dex original)",
 			}
 			
 			if isInfoCD then return end
@@ -15693,7 +15695,7 @@ Main = (function()
 
 	Main.SaveCurrentSettings = function()
 		if writefile then
-			writefile("DexPlusPlusSettings.json", Main.ExportSettings())
+			writefile("GokuDexSettings.json", Main.ExportSettings())
 		end
 	end
 
@@ -15705,7 +15707,7 @@ Main = (function()
 		Main.Elevated = pcall(function() local a = game:GetService("CoreGui"):GetFullName() end)
 		
 		-- saves new settings if does not exist
-		if isfile and not isfile("DexPlusPlusSettings.json") then
+		if isfile and not isfile("GokuDexSettings.json") and not isfile("DexPlusPlusSettings.json") then
 			Main.SaveCurrentSettings()
 		end
 		
@@ -15745,7 +15747,7 @@ Main = (function()
 		pcall(Main.LoadGCBypass)]]
 
 		-- Fetch version if needed
-		intro.SetProgress("Fetching Roblox Version",0.3)
+		intro.SetProgress("GokuDex: Checking Version",0.3)
 		if Main.Elevated then
 			local fileVer = Lib.ReadFile("dex/deps_version.dat")
 			Main.ClientVersion = Version()
@@ -15760,7 +15762,7 @@ Main = (function()
 		end
 
 		-- Fetch external deps
-		intro.SetProgress("Fetching API",0.35)
+		intro.SetProgress("GokuDex: Loading API",0.35)
 		API = Main.FetchAPI(
 			function()
 				intro.SetProgress("Fetching API, Please Wait.",0.4)
@@ -15773,7 +15775,7 @@ Main = (function()
 			end
 		)
 		Lib.FastWait()
-		intro.SetProgress("Fetching RMD",0.5)
+		intro.SetProgress("GokuDex: Loading Reflection",0.5)
 		RMD = Main.FetchRMD()
 		Lib.FastWait()
 
@@ -15785,13 +15787,13 @@ Main = (function()
 		end
 
 		-- Load other modules
-		intro.SetProgress("Loading Modules",0.75)
+		intro.SetProgress("GokuDex: Charging Ki & Modules",0.75)
 		Main.AppControls.Lib.InitDeps(Main.GetInitDeps()) -- Missing deps now available
 		Main.LoadModules()
 		Lib.FastWait()
 
 		-- Init other modules
-		intro.SetProgress("Initializing Modules",0.8)
+		intro.SetProgress("GokuDex: Awakening Power",0.8)
 		Explorer.Init()
 		Properties.Init()
 		ScriptViewer.Init()
@@ -15803,9 +15805,10 @@ Main = (function()
 		
 		
 		if env.readfile and listfiles then
-			if #listfiles("dex/plugins") > 0 then
+			local pluginFolder = isfolder and isfolder("gokudex/plugins") and "gokudex/plugins" or "dex/plugins"
+			if #listfiles(pluginFolder) > 0 then
 				intro.SetProgress("Loading Plugin Files",0.8)
-				for _, pluginDir in pairs(listfiles("dex/plugins")) do
+				for _, pluginDir in pairs(listfiles(pluginFolder)) do
 					local moduleData = Main.LoadPluginFile(pluginDir)
 					moduleData.PluginData = moduleData.PluginData or {}
 
@@ -15828,7 +15831,7 @@ Main = (function()
 		Lib.FastWait()
 
 		-- Done
-		intro.SetProgress("Complete",1)
+		intro.SetProgress("GokuDex: Ready!",1)
 		coroutine.wrap(function()
 			Lib.FastWait(1.25)
 			intro.Close()
@@ -15848,7 +15851,7 @@ Main = (function()
 		Main.AppControls = {}
 		Main.Plugins = {}
 		for _, gui in pairs(Main.GetSecureContainer():GetChildren()) do
-			if string.sub(gui.Name,1,5) == "_DPP_" then -- DPP stands for DexPlusPlus
+			if string.sub(gui.Name,1,9) == "_GOKUDEX_" or string.sub(gui.Name,1,5) == "_DPP_" then
 				gui:Destroy()
 			end
 		end
