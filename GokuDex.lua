@@ -893,8 +893,16 @@ local function main()
 
 		Console.CommandLine.ScrollingFrame.TextBox.FocusLost:Connect(function(enterPressed)
 			if enterPressed and Console.CommandLine.ScrollingFrame.TextBox.Text ~= "" then
-				print("> "..Console.CommandLine.ScrollingFrame.TextBox.Text)
-				loadstring(Console.CommandLine.ScrollingFrame.TextBox.Text)()
+				local cmd = Console.CommandLine.ScrollingFrame.TextBox.Text
+				print("> "..cmd)
+				local lower = string.lower(string.gsub(cmd, "%s+", ""))
+				if lower == "exit" or lower == "quit" or lower == "close" or lower == "unload" or lower == "exit()" or lower == "quit()" or lower == "close()" then
+					if Main and Main.Uninit then
+						Main.Uninit()
+						return
+					end
+				end
+				pcall(function() loadstring(cmd)() end)
 			end
 		end)
 	end
@@ -14104,7 +14112,29 @@ local function main()
 			Settings.Decompiler.PreferDecompilerFallback = preferFallback.Toggled
 		end)
 		
-		-- Save buttons below
+		-- Save & Unload buttons below
+		local BackgroundCloseButton = Lib.Frame.new()
+		BackgroundCloseButton.Gui.Parent = window.GuiElems.Content
+		BackgroundCloseButton.Size = UDim2.new(1,0, 0,20)
+		BackgroundCloseButton.Position = UDim2.new(0,0, 1,-44)
+		
+		local LabelCloseButton = Lib.Label.new()
+		LabelCloseButton.Gui.Parent = window.GuiElems.Content
+		LabelCloseButton.Size = UDim2.new(1,0, 0,20)
+		LabelCloseButton.Position = UDim2.new(0,0, 1,-44)
+		LabelCloseButton.Gui.Text = "Close / Unload GokuDex"
+		LabelCloseButton.Gui.TextColor3 = Color3.fromRGB(255, 80, 80)
+		LabelCloseButton.Gui.TextXAlignment = Enum.TextXAlignment.Center
+		
+		local fullCloseBtn = Instance.new("TextButton")
+		fullCloseBtn.Parent = BackgroundCloseButton.Gui
+		fullCloseBtn.Size = UDim2.new(1,0, 1,0)
+		fullCloseBtn.Position = UDim2.new(0,0, 0,0)
+		fullCloseBtn.Transparency = 1
+		fullCloseBtn.MouseButton1Click:Connect(function()
+			Main.Uninit()
+		end)
+
 		local BackgroundreloadButton = Lib.Frame.new()
 		BackgroundreloadButton.Gui.Parent = window.GuiElems.Content
 		BackgroundreloadButton.Size = UDim2.new(1,0, 0,20)
@@ -15565,6 +15595,8 @@ Main = (function()
 			{19,"ImageLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Image="rbxassetid://129589545519436",ImageRectSize=Vector2.new(32,32),Name="Icon",Parent={18},Position=UDim2.new(0.5,-16,0,4),ScaleType=4,Size=UDim2.new(0,32,0,32),}},
 			{20,"TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,BorderSizePixel=0,Font=3,Name="AppName",Parent={18},Position=UDim2.new(0,2,0,38),Size=UDim2.new(1,-4,1,-40),Text="Explorer",TextColor3=Color3.new(1,1,1),TextSize=14,TextTransparency=0.10000000149012,TextTruncate=1,TextWrapped=true,TextYAlignment=0,}},
 			{21,"Frame",{BackgroundColor3=Color3.new(0,0.66666668653488,1),BorderSizePixel=0,Name="Highlight",Parent={18},Position=UDim2.new(0,0,1,-2),Size=UDim2.new(1,0,0,2),}},
+			{22,"TextButton",{AutoButtonColor=true,BackgroundColor3=Color3.fromRGB(180,45,45),BorderSizePixel=0,Font=4,Name="CloseDex",Parent={6},Position=UDim2.new(0,4,0,2),Size=UDim2.new(0,72,0,20),Text="Close Dex",TextColor3=Color3.new(1,1,1),TextSize=12,}},
+			{23,"UICorner",{CornerRadius=UDim.new(0,3),Parent={22},}},
 		})
 		Main.MainGui = gui
 		Main.AppsFrame = gui.OpenButton.MainFrame.AppsFrame
@@ -15597,6 +15629,14 @@ Main = (function()
 		
 		--openButton.MainFrame.BottomFrame.Settings.Visible = false
 		
+		openButton.MainFrame.BottomFrame.CloseDex.MouseButton1Click:Connect(function()
+			Main.Uninit()
+		end)
+		
+		openButton.MouseButton2Click:Connect(function()
+			Main.Uninit()
+		end)
+
 		openButton.MainFrame.BottomFrame.Settings.MouseButton1Click:Connect(function()
 			if not SettingsWindow.Window.Closed then
 				SettingsWindow.Window:Hide()
@@ -15865,6 +15905,19 @@ Main = (function()
 
 	return Main
 end)()
+
+-- Global Close / Unload handles
+if getgenv then
+	pcall(function()
+		getgenv().GokuDexClose = function()
+			if Main and Main.Uninit then
+				Main.Uninit()
+			end
+		end
+		getgenv().CloseGokuDex = getgenv().GokuDexClose
+		getgenv().UnloadGokuDex = getgenv().GokuDexClose
+	end)
+end
 
 -- Start
 Main.Init()
