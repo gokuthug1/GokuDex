@@ -218,6 +218,66 @@ local Services = {
     GuiService = GetService("GuiService");
 }
 
+-- ============================================================================
+-- FONT & ENUM FONTWEIGHT SAFETY SHIM
+-- Fixes: "Save failed: Invalid value for enum FontWeight"
+-- In Roblox, indexing Enum.FontWeight with invalid values or passing numbers/
+-- invalid enums to Font.new causes "Invalid value for enum FontWeight".
+-- This shim sanitizes Font.new and protects against invalid FontWeight lookups.
+-- ============================================================================
+do
+    local FontWeightNumMap = {
+        [100] = Enum.FontWeight.Thin,
+        [200] = Enum.FontWeight.ExtraLight,
+        [300] = Enum.FontWeight.Light,
+        [400] = Enum.FontWeight.Regular,
+        [500] = Enum.FontWeight.Medium,
+        [600] = Enum.FontWeight.SemiBold,
+        [700] = Enum.FontWeight.Bold,
+        [800] = Enum.FontWeight.ExtraBold,
+        [900] = Enum.FontWeight.Heavy,
+    }
+
+    local FontWeightNameMap = {
+        ["Thin"] = Enum.FontWeight.Thin,
+        ["ExtraLight"] = Enum.FontWeight.ExtraLight,
+        ["Light"] = Enum.FontWeight.Light,
+        ["Regular"] = Enum.FontWeight.Regular,
+        ["Medium"] = Enum.FontWeight.Medium,
+        ["SemiBold"] = Enum.FontWeight.SemiBold,
+        ["Bold"] = Enum.FontWeight.Bold,
+        ["ExtraBold"] = Enum.FontWeight.ExtraBold,
+        ["Heavy"] = Enum.FontWeight.Heavy,
+    }
+
+    local RawFontNew = Font.new
+    pcall(function()
+        Font.new = function(family, weight, style)
+            local safeWeight = Enum.FontWeight.Regular
+            if typeof(weight) == "EnumItem" and weight.EnumType == Enum.FontWeight then
+                safeWeight = weight
+            elseif type(weight) == "number" then
+                safeWeight = FontWeightNumMap[weight] or Enum.FontWeight.Regular
+            elseif type(weight) == "string" then
+                safeWeight = FontWeightNameMap[weight] or Enum.FontWeight.Regular
+            end
+
+            local safeStyle = Enum.FontStyle.Normal
+            if typeof(style) == "EnumItem" and style.EnumType == Enum.FontStyle then
+                safeStyle = style
+            elseif type(style) == "string" then
+                if style == "Italic" then
+                    safeStyle = Enum.FontStyle.Italic
+                else
+                    safeStyle = Enum.FontStyle.Normal
+                end
+            end
+
+            return RawFontNew(family or "", safeWeight, safeStyle)
+        end
+    end)
+end
+
 task.wait(0.2)
 
 do
@@ -480,7 +540,28 @@ local function SerializeValue(Value)
     elseif Type == "Instance" then
         return `nil --[[ ref: {Value:GetFullName()} ]]`
     elseif Type == "Font" then
-        return `Font.new({FormatLuaString(Value.Family)}, Enum.FontWeight.{Value.Weight.Name}, Enum.FontStyle.{Value.Style.Name})`
+        local familyStr = '""'
+        pcall(function() familyStr = FormatLuaString(Value.Family or "") end)
+        local weightStr = "Regular"
+        pcall(function()
+            local w = Value.Weight
+            if typeof(w) == "EnumItem" and w.EnumType == Enum.FontWeight then
+                weightStr = w.Name
+            elseif type(w) == "number" then
+                local numMap = {[100]="Thin",[200]="ExtraLight",[300]="Light",[400]="Regular",[500]="Medium",[600]="SemiBold",[700]="Bold",[800]="ExtraBold",[900]="Heavy"}
+                weightStr = numMap[w] or "Regular"
+            elseif type(w) == "string" then
+                weightStr = w
+            end
+        end)
+        local styleStr = "Normal"
+        pcall(function()
+            local s = Value.Style
+            if typeof(s) == "EnumItem" and s.EnumType == Enum.FontStyle then
+                styleStr = s.Name
+            end
+        end)
+        return `Font.new({familyStr}, Enum.FontWeight.{weightStr}, Enum.FontStyle.{styleStr})`
     end
 
     return `nil --[[ unsupported {Type} ]]`
@@ -3041,6 +3122,16 @@ local SynSaveInstanceErr
 local SynSaveInstanceTried = false
 local function LoadSynSaveInstance()
     if SynSaveInstance then return SynSaveInstance end
+    
+    -- Check if executor provides native saveinstance
+    local nativeSave = GetGlobalCallable("saveinstance") or GetGlobalCallable("save_instance")
+    if nativeSave then
+        SynSaveInstance = function(Options)
+            return nativeSave(Options)
+        end
+        return SynSaveInstance
+    end
+
     if SynSaveInstanceTried then return nil, SynSaveInstanceErr end
     SynSaveInstanceTried = true
 
@@ -3069,7 +3160,14 @@ local function LoadSynSaveInstance()
         return nil, SynSaveInstanceErr
     end
 
-    SynSaveInstance = Result
+    SynSaveInstance = function(Options)
+        Options = Options or {}
+        local ok, err = pcall(Result, Options)
+        if not ok then
+            warn("[GokuDex SaveInstance]", err)
+        end
+        return ok, err
+    end
     return SynSaveInstance
 end
 
