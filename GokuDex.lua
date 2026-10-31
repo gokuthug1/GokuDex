@@ -15637,26 +15637,54 @@ Main = (function()
 	Main.SetMainGuiOpen = function(val)
 		Main.MainGuiOpen = val
 
-		Main.MainGui.OpenButton.Text = val and "Close" or "GokuDex"
-		if val then Main.MainGui.OpenButton.MainFrame.Visible = true end
-		Main.MainGui.OpenButton.MainFrame:TweenSize(val and UDim2.new(0,224,0,200) or UDim2.new(0,0,0,0),Enum.EasingDirection.Out,Enum.EasingStyle.Quad,0.2,true)
-		--Main.MainGui.OpenButton.BackgroundTransparency = val and 0 or (Lib.CheckMouseInGui(Main.MainGui.OpenButton) and 0 or 0.2)
-		service.TweenService:Create(Main.MainGui.OpenButton,TweenInfo.new(0.2,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundTransparency = val and 0 or (Lib.CheckMouseInGui(Main.MainGui.OpenButton) and 0 or 0.2)}):Play()
+		local mainGui = Main.MainGui
+		local openButton = mainGui and mainGui:FindFirstChild("OpenButton")
+		if not openButton then
+			if Main.MainGuiMouseEvent then
+				pcall(function() Main.MainGuiMouseEvent:Disconnect() end)
+				Main.MainGuiMouseEvent = nil
+			end
+			return
+		end
 
-		if Main.MainGuiMouseEvent then Main.MainGuiMouseEvent:Disconnect() end
+		local mainFrame = openButton:FindFirstChild("MainFrame")
+
+		openButton.Text = val and "Close" or "GokuDex"
+		if mainFrame then
+			if val then mainFrame.Visible = true end
+			mainFrame:TweenSize(val and UDim2.new(0,224,0,200) or UDim2.new(0,0,0,0),Enum.EasingDirection.Out,Enum.EasingStyle.Quad,0.2,true)
+		end
+		service.TweenService:Create(openButton,TweenInfo.new(0.2,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundTransparency = val and 0 or (Lib.CheckMouseInGui(openButton) and 0 or 0.2)}):Play()
+
+		if Main.MainGuiMouseEvent then
+			pcall(function() Main.MainGuiMouseEvent:Disconnect() end)
+			Main.MainGuiMouseEvent = nil
+		end
 
 		if not val then
 			local startTime = tick()
 			Main.MainGuiCloseTime = startTime
 			coroutine.wrap(function()
 				Lib.FastWait(0.2)
-				if not Main.MainGuiOpen and startTime == Main.MainGuiCloseTime then Main.MainGui.OpenButton.MainFrame.Visible = false end
+				if not Main.MainGuiOpen and startTime == Main.MainGuiCloseTime and mainFrame then
+					mainFrame.Visible = false
+				end
 			end)()
 		else
 			Main.MainGuiMouseEvent = service.UserInputService.InputBegan:Connect(function(input)
-				if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not Lib.CheckMouseInGui(Main.MainGui.OpenButton) and not Lib.CheckMouseInGui(Main.MainGui.OpenButton.MainFrame) then
-
-					Main.SetMainGuiOpen(false)
+				if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+					local curOpenBtn = Main.MainGui and Main.MainGui:FindFirstChild("OpenButton")
+					if not curOpenBtn then
+						if Main.MainGuiMouseEvent then
+							pcall(function() Main.MainGuiMouseEvent:Disconnect() end)
+							Main.MainGuiMouseEvent = nil
+						end
+						return
+					end
+					local curFrame = curOpenBtn:FindFirstChild("MainFrame")
+					if not Lib.CheckMouseInGui(curOpenBtn) and (not curFrame or not Lib.CheckMouseInGui(curFrame)) then
+						Main.SetMainGuiOpen(false)
+					end
 				end
 			end)
 		end
@@ -15705,13 +15733,13 @@ Main = (function()
 
 		openButton.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-				service.TweenService:Create(Main.MainGui.OpenButton,TweenInfo.new(0,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundTransparency = 0}):Play()
+				service.TweenService:Create(openButton,TweenInfo.new(0,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundTransparency = 0}):Play()
 			end
 		end)
 
 		openButton.InputEnded:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-				service.TweenService:Create(Main.MainGui.OpenButton,TweenInfo.new(0,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundTransparency = Main.MainGuiOpen and 0 or 0.2}):Play()
+				service.TweenService:Create(openButton,TweenInfo.new(0,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundTransparency = Main.MainGuiOpen and 0 or 0.2}):Play()
 			end
 		end)
 		
@@ -15834,6 +15862,7 @@ Main = (function()
 	end
 
 	Main.Init = function()
+		pcall(Main.Uninit)
 		Main.Elevated = pcall(function() local a = game:GetService("CoreGui"):GetFullName() end)
 		
 		-- saves new settings if does not exist
@@ -15971,12 +16000,19 @@ Main = (function()
 	end
 	
 	Main.Uninit = function()
+		if Main.MainGuiMouseEvent then
+			pcall(function() Main.MainGuiMouseEvent:Disconnect() end)
+			Main.MainGuiMouseEvent = nil
+		end
 		Main.MenuApps = {}
 		Main.AppControls = {}
 		Main.Plugins = {}
-		for _, gui in pairs(Main.GetSecureContainer():GetChildren()) do
-			if string.sub(gui.Name,1,9) == "_GOKUDEX_" or string.sub(gui.Name,1,5) == "_DPP_" then
-				gui:Destroy()
+		local container = Main.GetSecureContainer()
+		if container then
+			for _, gui in pairs(container:GetChildren()) do
+				if string.sub(gui.Name,1,9) == "_GOKUDEX_" or string.sub(gui.Name,1,5) == "_DPP_" then
+					pcall(function() gui:Destroy() end)
+				end
 			end
 		end
 	end
