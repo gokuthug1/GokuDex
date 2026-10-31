@@ -14719,8 +14719,7 @@ Main = (function()
 					end
 				end
 				table.insert(lines, "</Item>")
-				return table.concat(lines, "
-")
+				return table.concat(lines, "\n")
 			end
 
 			if rootObj == game then
@@ -14741,8 +14740,7 @@ Main = (function()
 	<External>null</External>
 	<External>nil</External>
 %s
-</roblox>]], table.concat(bodyLines, "
-"))
+</roblox>]], table.concat(bodyLines, "\n"))
 
 			if env.writefile then
 				env.writefile(filepath, fullDoc)
@@ -14785,7 +14783,7 @@ Main = (function()
 		end
 
 		env.parsefile = function(name)
-			return tostring(name):gsub("[*\?:<>|]+", ""):sub(1, 175)
+			return tostring(name):gsub("[*\\?:<>|]+", ""):sub(1, 175)
 		end
 
 		-- debug
@@ -14840,8 +14838,7 @@ Main = (function()
 			table.insert(out, "")
 			if #bytecode < 4 then
 				table.insert(out, "-- [Bytecode too short or empty]")
-				return table.concat(out, "
-")
+				return table.concat(out, "\n")
 			end
 			table.insert(out, "-- Bytecode Version: " .. tostring(string.byte(bytecode, 1)))
 
@@ -14873,17 +14870,14 @@ Main = (function()
 			end
 			table.insert(out, "")
 			table.insert(out, "-- (Use 'Dump Functions' button above to inspect upvalues, constants, and gc closure functions natively)")
-			return table.concat(out, "
-")
+			return table.concat(out, "\n")
 		end
 
 		env.decompile = function(script_instance, ...)
 			-- 1. Check if server script
 			if script_instance and typeof(script_instance) == "Instance" then
 				if (script_instance.ClassName == "Script" and (script_instance.RunContext == Enum.RunContext.Legacy or script_instance.RunContext == Enum.RunContext.Server)) then
-					return "-- [GokuDex Native Decompiler]
--- Cannot decompile: Server scripts run on the server and their bytecode is not replicated to clients.
--- Path: " .. script_instance:GetFullName()
+					return "-- [GokuDex Native Decompiler]\n-- Cannot decompile: Server scripts run on the server and their bytecode is not replicated to clients.\n-- Path: " .. script_instance:GetFullName()
 				end
 			end
 
@@ -14913,38 +14907,8 @@ Main = (function()
 				end
 			end
 
-			return "-- [GokuDex Native Decompiler]
--- Decompilation is not supported by your current executor for this script."
+			return "-- [GokuDex Native Decompiler]\n-- Decompilation is not supported by your current executor for this script."
 		end
-			end
-			-- Fallback 1: try reading script .Source directly
-			if script_instance and typeof(script_instance) == "Instance" then
-				local okSrc, src = pcall(function() return script_instance.Source end)
-				if okSrc and src and type(src) == "string" and #src > 0 then
-					return src
-				end
-			end
-			-- Fallback 2: only use bytecode services if fallback is explicitly requested
-			if typeof(getscriptbytecode) == "function" and Settings.Decompiler.PreferDecompilerFallback == true then
-				local fallbackMode = Settings.Decompiler.DecompilerFallback
-				if fallbackMode == "Konstant" then
-					local okK, resK = pcall(KonstantDec, script_instance, ...)
-					if okK and type(resK) == "string" and not resK:find("Failed to decode Luau bytecode") then
-						return resK
-					end
-				elseif fallbackMode == "AdvancedDecompiler" then
-					return ADDec(script_instance, ...)
-				elseif fallbackMode == "Shiny" then
-					return ShinyDec(script_instance, ...)
-				end
-			end
-			return "-- [Decompilation failed or not supported on this script]"
-		end
-		
-		--[[if Main.Elevated then
-			getgenv().decompile = env.decompile
-		end]]
-		
 
 		if identifyexecutor then
 			Main.Executor = identifyexecutor()
