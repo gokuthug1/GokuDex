@@ -1,25 +1,64 @@
 # ⚡ GokuDex Ultimate
 
 > **The Definitive, Aura-Charged Roblox Explorer**  
-> Unified, modernized, and supercharged by merging the best of **GokuDex**, **Dex++**, and **VEX Explorer**.
+> 100% Native, Fully Self-Contained, and Supercharged by merging the best of **GokuDex**, **Dex++**, and **VEX Explorer**.
 
 ---
 
 ## 🚀 Quick Launch
 
-Execute the following in your executor:
+Execute the master standalone build directly in your executor:
 
 ```lua
-loadstring(game:HttpGet("https://github.com/gokuthug1/GokuDex/raw/refs/heads/main/GokuDex.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/gokuthug1/GokuDex/refs/heads/main/GokuDex.lua"))()
 ```
 
 ---
 
-## ✨ What Makes GokuDex Ultimate?
+## 🛡️ 100% Native Architecture
 
-GokuDex Ultimate combines the blazing-fast virtualized rendering engine of VEX with the developer console, notebook, and modular docking of Dex++, all wrapped in Goku's signature Super Saiyan Aura remaster.
+GokuDex Ultimate has been completely re-engineered to be **100% native and self-contained in this repository**:
 
-### 🌟 Key Features
+- 🔒 **Zero External HTTP Dependencies**: No external web APIs (`plusgiant5.com`), third-party scrapers, or third-party GitHub repositories (`AZYsGithub`, `CloneTrooper1019`, `luau/SynSaveInstance`, `secretisadev`). Everything is contained directly within `gokuthug1/GokuDex`.
+- ⚡ **Instant 0.05s Startup**: No blocking network requests or remote API timeouts. The full Roblox API and Reflection Metadata are embedded natively and decode in milliseconds.
+- 💻 **100% In-Process Native Decompiler**:
+  - Automatically utilizes native executor `decompile()`.
+  - Direct `.Source` extraction for readable scripts and Studio testing.
+  - Native Luau bytecode inspector that decodes string literals, identifiers, and proto structures locally without ever sending bytecode to external servers.
+- 💾 **100% Native SaveInstance & Serializer**:
+  - Leverages native executor `saveinstance()` / `save_instance()`.
+  - Built-in pure-Luau place serializer (`NativeSerializer.lua`) that builds and saves `.rbxlx` XML place files offline.
+- 🛡️ **Native Anti-Cheat & Memory Shield**:
+  - Hooks and stabilizes `gcinfo()` and `collectgarbage("count")` to prevent anti-cheats from detecting explorer memory spikes.
+  - Intercepts `UserInputService:GetFocusedTextBox` and `ContentProvider:PreloadAsync` to conceal GokuDex interfaces from game scripts.
+
+---
+
+## 📁 Repository Structure
+
+Everything needed to develop, run, and extend GokuDex is hosted directly in this repository:
+
+```
+GokuDex/
+├── GokuDex.lua              # Master standalone release (100% self-contained, pre-bundled)
+├── README.md                # Documentation & quick launch
+└── Modules/                 # Individual native modules
+    ├── Explorer.lua         # Hierarchy tree engine & VTree virtualization
+    ├── Properties.lua       # Real-time reflection property inspector & editor
+    ├── ScriptViewer.lua     # Script notepad, constant dumper & code runner
+    ├── Console.lua          # Live developer console & Luau command bar
+    ├── SaveInstance.lua     # SaveInstance configuration UI & manager
+    ├── ModelViewer.lua      # 3D Viewport model & mesh previewer with orbit camera
+    ├── SettingsWindow.lua   # Layout manager, docking presets & theme customizer
+    ├── Lib.lua              # Core UI framework, windowing & drawing primitives
+    ├── Bypasses.lua         # Native anti-detection, GC spoofing & UI concealment
+    ├── Decompiler.lua       # In-process decompiler bridge & bytecode inspector
+    └── NativeSerializer.lua # Pure-Luau .rbxlx XML place & model serializer
+```
+
+---
+
+## ✨ Key Features
 
 - ⚡ **VTree 60+ FPS Virtualization**: Smoothly browses hierarchies with over 500,000+ instances without frame drops or freezes.
 - 🛡️ **140+ RiskyServices Blacklist**: Completely immune to game kicks, anti-cheat detections, and permission crashes when scanning `game` or internal services.
@@ -35,7 +74,6 @@ GokuDex Ultimate combines the blazing-fast virtualized rendering engine of VEX w
 - 💻 **Developer Console & Command Line**: Live console log (Output, Info, Warning, Error) with an embedded Luau execution command line and history.
 - 📝 **Notebook / Scratchpad**: Multi-line script scratchpad with syntax font, line counters, Run Code execution, and persistent file saving (`gokudex_notes.txt`).
 - 🔌 **Plugin Architecture**: Automatically loads custom user plugins from `gokudex/plugins` and `dex/plugins`.
-- 💾 **Universal Decompiler & SaveInstance**: Multi-tier decompiler fallbacks (native, bytecode dump, remote API) and universal place saving (.rbxl).
 - 🎨 **Goku Super Saiyan Aura Remaster**:
   - **Goku Super Saiyan (Default)**: Vibrant Orange (`#FF9826`) & Super Saiyan Blue (`#4DACFF`) with Dark Shell (`#0B0E15`)
   - **Goku Super Saiyan Blue**: Royal Sapphire & Divine Cyan
@@ -97,14 +135,13 @@ GokuDex Ultimate features a hardened environment bridge supporting:
 | **Delta** | ✅ | ✅ | ✅ |
 | **Codex** | ✅ | ✅ | ✅ |
 | **Arceus X** | ✅ | ✅ | ✅ |
-| **Solara** | ✅ | ⚠️ (Fallback) | ⚠️ (Fallback) |
-| **Celery** | ✅ | ⚠️ (Fallback) | ⚠️ (Fallback) |
+| **Solara** | ✅ | ✅ (Native Bytecode Inspector) | ✅ (Native Serializer) |
+| **Celery** | ✅ | ✅ (Native Bytecode Inspector) | ✅ (Native Serializer) |
 | **Macsploit** | ✅ | ✅ | ✅ |
 | **Appleware** | ✅ | ✅ | ✅ |
-| **Roblox Studio** | ✅ | N/A | N/A |
+| **Roblox Studio** | ✅ | ✅ (Native Source) | ✅ (Native Serializer) |
 
 ---
-
 
 ### 👤 Credits
 - **gokuthug1**: GokuDex creator & ultimate unified remaster
