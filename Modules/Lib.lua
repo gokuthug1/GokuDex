@@ -40,8 +40,12 @@ end
 local function main()
 	local Lib = {}
 
-	local renderStepped = service.RunService.RenderStepped
-	local signalWait = renderStepped.wait
+	local stepSignal = (service.RunService and (service.RunService.Heartbeat or service.RunService.RenderStepped))
+	local signalWait = function(sig)
+		if task and task.wait then return task.wait() end
+		if sig and sig.Wait then return sig:Wait() end
+		return wait()
+	end
 	local PH = newproxy() -- Placeholder, must be replaced in constructor
 	local SIGNAL = newproxy()
 
@@ -285,9 +289,12 @@ local function main()
 	end)()
 
 	Lib.FastWait = function(s)
-		if not s then return signalWait(renderStepped) end
+		if task and task.wait then
+			return task.wait(s)
+		end
+		if not s then return signalWait(stepSignal) end
 		local start = tick()
-		while tick() - start < s do signalWait(renderStepped) end
+		while tick() - start < s do signalWait(stepSignal) end
 	end
 
 	Lib.ButtonAnim = function(button,data)
@@ -443,7 +450,11 @@ local function main()
 	end
 
 	Lib.DeferFunc = function(f,...)
-		signalWait(renderStepped)
+		if task and task.defer then
+			task.defer(f, ...)
+			return
+		end
+		signalWait(stepSignal)
 		return f(...)
 	end
 
@@ -3256,7 +3267,13 @@ local function main()
 
 		funcs.ShowAndFocus = function(self,data)
 			static.ShowWindow(self,data)
-			service.RunService.RenderStepped:wait()
+			if task and task.wait then
+				task.wait()
+			elseif service.RunService and service.RunService.Heartbeat then
+				service.RunService.Heartbeat:Wait()
+			else
+				wait()
+			end
 			self:Focus()
 		end
 

@@ -608,7 +608,7 @@ local function main()
 		local LogService = game:GetService("LogService")
 		local Players = game:GetService("Players")
 		local LocalPlayer = Players.LocalPlayer
-		local Mouse = LocalPlayer:GetMouse()
+		local Mouse = (LocalPlayer and pcall(function() return LocalPlayer:GetMouse() end) and LocalPlayer:GetMouse()) or (Main and Main.Mouse) or nil
 		local UserInputService = game:GetService("UserInputService")
 		local RunService = game:GetService("RunService")
 
