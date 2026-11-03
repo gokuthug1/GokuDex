@@ -21,92 +21,6 @@ end
 local nativeDecompile = getGlobal("decompile") or (syn and syn.decompile)
 local nativeSaveInstance = getGlobal("saveinstance") or getGlobal("save_instance") or (syn and syn.saveinstance) or (syn and syn.save_instance)
 
--- ============================================================================
--- MATH SAFETY SHIM
--- Fixes: "invalid argument #1 to 'ceil' (number expected, got nil)"
--- Protects math.ceil and math.floor against unexpected nil arguments from
--- game scripts, saveinstance, or rendering calculations.
--- ============================================================================
-do
-    local raw_ceil = math.ceil
-    local raw_floor = math.floor
-    pcall(function()
-        math.ceil = function(x)
-            if type(x) ~= "number" then
-                return 0
-            end
-            return raw_ceil(x)
-        end
-        math.floor = function(x)
-            if type(x) ~= "number" then
-                return 0
-            end
-            return raw_floor(x)
-        end
-    end)
-end
-
--- ============================================================================
--- FONT & ENUM FONTWEIGHT SAFETY SHIM
--- Fixes: "Save failed: Invalid value for enum FontWeight"
--- In Roblox, indexing Enum.FontWeight with invalid values or passing numbers/
--- invalid enums to Font.new causes "Invalid value for enum FontWeight".
--- This shim sanitizes Font.new and protects against invalid FontWeight lookups.
--- ============================================================================
-do
-    local FontWeightNumMap = {
-        [100] = Enum.FontWeight.Thin,
-        [200] = Enum.FontWeight.ExtraLight,
-        [300] = Enum.FontWeight.Light,
-        [400] = Enum.FontWeight.Regular,
-        [500] = Enum.FontWeight.Medium,
-        [600] = Enum.FontWeight.SemiBold,
-        [700] = Enum.FontWeight.Bold,
-        [800] = Enum.FontWeight.ExtraBold,
-        [900] = Enum.FontWeight.Heavy,
-    }
-
-    local FontWeightNameMap = {
-        ["Thin"] = Enum.FontWeight.Thin,
-        ["ExtraLight"] = Enum.FontWeight.ExtraLight,
-        ["Light"] = Enum.FontWeight.Light,
-        ["Regular"] = Enum.FontWeight.Regular,
-        ["Medium"] = Enum.FontWeight.Medium,
-        ["SemiBold"] = Enum.FontWeight.SemiBold,
-        ["Bold"] = Enum.FontWeight.Bold,
-        ["ExtraBold"] = Enum.FontWeight.ExtraBold,
-        ["Heavy"] = Enum.FontWeight.Heavy,
-    }
-
-    local RawFontNew = Font.new
-    pcall(function()
-        Font.new = function(family, weight, style)
-            local safeWeight = Enum.FontWeight.Regular
-            if typeof(weight) == "EnumItem" and weight.EnumType == Enum.FontWeight then
-                safeWeight = weight
-            elseif type(weight) == "number" then
-                safeWeight = FontWeightNumMap[weight] or Enum.FontWeight.Regular
-            elseif type(weight) == "string" then
-                safeWeight = FontWeightNameMap[weight] or Enum.FontWeight.Regular
-            end
-
-            local safeStyle = Enum.FontStyle.Normal
-            if typeof(style) == "EnumItem" and style.EnumType == Enum.FontStyle then
-                safeStyle = style
-            elseif type(style) == "string" then
-                if style == "Italic" then
-                    safeStyle = Enum.FontStyle.Italic
-                else
-                    safeStyle = Enum.FontStyle.Normal
-                end
-            end
-
-            return RawFontNew(family or "", safeWeight, safeStyle)
-        end
-    end)
-end
-
-
 local selection
 local nodes = {}
 
@@ -114,7 +28,7 @@ local oldgame = game
 local game = (workspace and workspace.Parent) or oldgame or game
 
 local nativeCloneref = (type(cloneref) == "function" and cloneref) or (syn and type(syn.cloneref) == "function" and syn.cloneref)
-cloneref = function(ref)
+local cloneref = function(ref)
 	if not ref then return ref end
 	if nativeCloneref then
 		local ok, res = pcall(nativeCloneref, ref)
@@ -1291,7 +1205,7 @@ local function main()
 	end
 
 	Explorer.UpdateView = function()
-		local maxNodes = math.ceil(treeFrame.AbsoluteSize.Y / 20)
+		local maxNodes = math.ceil((treeFrame and treeFrame.AbsoluteSize and treeFrame.AbsoluteSize.Y or 0) / 20)
 		local maxX = treeFrame.AbsoluteSize.X
 		local totalWidth = Explorer.ViewWidth + Explorer.FreeWidth
 
@@ -11826,7 +11740,7 @@ local function main()
 	end
 
 	Properties.UpdateView = function()
-		local maxEntries = math.ceil(propsFrame.AbsoluteSize.Y / 23)
+		local maxEntries = math.ceil((propsFrame and propsFrame.AbsoluteSize and propsFrame.AbsoluteSize.Y or 0) / 23)
 		local maxX = propsFrame.AbsoluteSize.X
 		local totalWidth = Properties.ViewWidth + Properties.MinInputWidth
 
@@ -14511,42 +14425,17 @@ Main = (function()
 	Main.Plugins = {}
 
 	Main.LoadGCBypass = function()
-		-- 100% Native Anti-Cheat & Memory Spike Protection (Offline, In-Process)
-		pcall(function()
-			local hookfunction = getGlobal("hookfunction")
-			local checkcaller = getGlobal("checkcaller") or function() return false end
-			local newcclosure = getGlobal("newcclosure") or function(f) return f end
-
-			if hookfunction and type(gcinfo) == "function" then
-				local oldGcInfo
-				local baseGc = gcinfo()
-				oldGcInfo = hookfunction(gcinfo, newcclosure(function(...)
-					if checkcaller and checkcaller() then return oldGcInfo(...) end
-					return baseGc + math.random(50, 150)
-				end))
-			end
-
-			if hookfunction and type(collectgarbage) == "function" then
-				local oldCollectGarbage
-				local baseGcKb = (type(gcinfo) == "function" and gcinfo()) or 10240
-				oldCollectGarbage = hookfunction(collectgarbage, newcclosure(function(opt, ...)
-					if checkcaller and checkcaller() then return oldCollectGarbage(opt, ...) end
-					if type(opt) == "string" and opt:lower() == "count" then
-						return baseGcKb + math.random(50, 150)
-					end
-					return oldCollectGarbage(opt, ...)
-				end))
-			end
-		end)
 		return true
 	end
 	
-	Main.GetRandomString = function()
+	Main.GetRandomString = function(len)
+		len = len or 8
+		local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 		local output = ""
-		for i = 2, 25 do
-			output = output .. string.char(math.random(1,250))
+		for i = 1, len do
+			local r = math.random(1, #chars)
+			output = output .. chars:sub(r, r)
 		end
-		
 		return output
 	end
 	
@@ -14568,7 +14457,9 @@ Main = (function()
 	end
 	
 	Main.SecureGui = function(gui)
-		gui.Name = "_GOKUDEX_".. Main.GetRandomString()
+		if not gui.Name or gui.Name == "" or string.sub(gui.Name, 1, 9) == "_GOKUDEX_" then
+			gui.Name = "Dex"
+		end
 		local parented = false
 		if gethui then
 			local ok = pcall(function() gui.Parent = gethui() end)
@@ -16002,8 +15893,7 @@ Main = (function()
 			Explorer = 0, Properties = 1, Script_Viewer = 2, Watcher = 3, Output = 4, ScriptEdit = 5, Book = 6, Executor = 7, Object = 8, Honey = 9
 		})
 		
-		intro.SetProgress("GokuDex: Armoring Environment", 0.15)
-		pcall(Main.LoadGCBypass)
+		intro.SetProgress("GokuDex: Initializing Core", 0.15)
 
 		-- Native Version Check (Offline & Instant)
 		intro.SetProgress("GokuDex: Initializing Engine", 0.3)
@@ -16114,7 +16004,7 @@ Main = (function()
 		local container = Main.GetSecureContainer()
 		if container then
 			for _, gui in pairs(container:GetChildren()) do
-				if string.sub(gui.Name,1,9) == "_GOKUDEX_" or string.sub(gui.Name,1,5) == "_DPP_" then
+				if gui.Name == "Dex" or gui.Name == "GokuDex" or string.sub(gui.Name, 1, 4) == "Dex_" or string.sub(gui.Name,1,9) == "_GOKUDEX_" or string.sub(gui.Name,1,5) == "_DPP_" or gui.Name == "Window" or gui.Name == "Intro" or gui.Name == "MainMenu" or gui.Name == "Context" or gui.Name == "BrickColor" then
 					pcall(function() gui:Destroy() end)
 				end
 			end

@@ -367,7 +367,7 @@ local function main()
 	end
 
 	Explorer.UpdateView = function()
-		local maxNodes = math.ceil(treeFrame.AbsoluteSize.Y / 20)
+		local maxNodes = math.ceil((treeFrame and treeFrame.AbsoluteSize and treeFrame.AbsoluteSize.Y or 0) / 20)
 		local maxX = treeFrame.AbsoluteSize.X
 		local totalWidth = Explorer.ViewWidth + Explorer.FreeWidth
 

@@ -495,7 +495,7 @@ local function main()
 	end
 
 	Properties.UpdateView = function()
-		local maxEntries = math.ceil(propsFrame.AbsoluteSize.Y / 23)
+		local maxEntries = math.ceil((propsFrame and propsFrame.AbsoluteSize and propsFrame.AbsoluteSize.Y or 0) / 23)
 		local maxX = propsFrame.AbsoluteSize.X
 		local totalWidth = Properties.ViewWidth + Properties.MinInputWidth
 
