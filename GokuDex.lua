@@ -11241,12 +11241,7 @@ local function main()
 	return ModelViewer
 end
 
--- TODO: Remove when open source
-if gethsfuncs then
-	_G.moduleData = {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-else
-	return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-end
+return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
 end,
 ["Properties"] = function()
 --[[
@@ -13156,12 +13151,7 @@ local function main()
 	return Properties
 end
 
--- TODO: Remove when open source
-if gethsfuncs then
-	_G.moduleData = {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-else
-	return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-end
+return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
 end,
 ["SaveInstance"] = function()
 --[[
@@ -13458,12 +13448,7 @@ local function main()
 	return SaveInstance
 end
 
--- TODO: Remove when open source
-if gethsfuncs then
-	_G.moduleData = {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-else
-	return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-end
+return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
 end,
 ["ScriptViewer"] = function()
 --[[
@@ -13767,12 +13752,7 @@ local function main()
 	return ScriptViewer
 end
 
--- TODO: Remove when open source
-if gethsfuncs then
-	_G.moduleData = {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-else
-	return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-end
+return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
 end,
 ["SettingsWindow"] = function()
 --[[
@@ -14218,18 +14198,13 @@ local function main()
 	return SettingsWindow
 end
 
--- TODO: Remove when open source
-if gethsfuncs then
-	_G.moduleData = {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-else
-	return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-end
+return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
 end,
 }
 local oldgame = oldgame or game
 
 local nativeCloneref2 = (type(cloneref) == "function" and cloneref) or (syn and type(syn.cloneref) == "function" and syn.cloneref)
-cloneref = function(ref)
+local cloneref = function(ref)
 	if not ref then return ref end
 	if nativeCloneref2 then
 		local ok, res = pcall(nativeCloneref2, ref)
@@ -14367,7 +14342,6 @@ local service = setmetatable({},{__index = function(self,name)
 	if RiskyServices[name] then return nil end
 	local ok, serv = pcall(function() return cloneref(game:GetService(name)) end)
 	if ok and serv then
-		self[name] = serv
 		return serv
 	end
 	return nil
@@ -14444,22 +14418,18 @@ Main = (function()
 			local ok, hui = pcall(gethui)
 			if ok and hui then return hui end
 		end
-		if service.CoreGui then
-			local ok = pcall(function() return service.CoreGui:GetChildren() end)
-			if ok then return service.CoreGui end
-		end
+		local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+		if ok and cg then return cg end
 		local player = service.Players and service.Players.LocalPlayer
 		if player then
 			local pgui = player:FindFirstChildWhichIsA("PlayerGui") or player:FindFirstChild("PlayerGui")
 			if pgui then return pgui end
 		end
-		return service.CoreGui
+		return cg
 	end
 	
 	Main.SecureGui = function(gui)
-		if not gui.Name or gui.Name == "" or string.sub(gui.Name, 1, 9) == "_GOKUDEX_" then
-			gui.Name = "Dex"
-		end
+		gui.Name = "Dex"
 		local parented = false
 		if gethui then
 			local ok = pcall(function() gui.Parent = gethui() end)
@@ -16020,18 +15990,7 @@ Main = (function()
 	return Main
 end)()
 
--- Global Close / Unload handles
-if getgenv then
-	pcall(function()
-		getgenv().GokuDexClose = function()
-			if Main and Main.Uninit then
-				Main.Uninit()
-			end
-		end
-		getgenv().CloseGokuDex = getgenv().GokuDexClose
-		getgenv().UnloadGokuDex = getgenv().GokuDexClose
-	end)
-end
+
 
 -- Start GokuDex safely
 local okInit, errInit = pcall(Main.Init)
