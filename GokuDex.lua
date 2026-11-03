@@ -984,6 +984,58 @@ local function main()
 	local iconData
 	local remote_blocklist = {} -- list of remotes beng blocked, k = the remote instance, v = their old function :3
 	nodes = nodes or {}
+	local RootServiceOrder = {
+		["Workspace"] = 1,
+		["workspace"] = 1,
+		["Players"] = 2,
+		["CoreGui"] = 3,
+		["Lighting"] = 4,
+		["MaterialService"] = 5,
+		["NetworkClient"] = 6,
+		["ReplicatedFirst"] = 7,
+		["ReplicatedStorage"] = 8,
+		["ServerScriptService"] = 9,
+		["ServerStorage"] = 10,
+		["StarterGui"] = 11,
+		["StarterPack"] = 12,
+		["StarterPlayer"] = 13,
+		["Teams"] = 14,
+		["SoundService"] = 15,
+		["TextChatService"] = 16,
+		["Chat"] = 17,
+		["LocalizationService"] = 18,
+		["TestService"] = 19,
+		["VoiceChatService"] = 20,
+		["CorePackages"] = 21,
+		["NetworkServer"] = 22,
+	}
+
+	local AllowedServices = {
+		["Workspace"] = true,
+		["workspace"] = true,
+		["Players"] = true,
+		["CoreGui"] = true,
+		["Lighting"] = true,
+		["MaterialService"] = true,
+		["NetworkClient"] = true,
+		["ReplicatedFirst"] = true,
+		["ReplicatedStorage"] = true,
+		["ServerScriptService"] = true,
+		["ServerStorage"] = true,
+		["StarterGui"] = true,
+		["StarterPack"] = true,
+		["StarterPlayer"] = true,
+		["Teams"] = true,
+		["SoundService"] = true,
+		["TextChatService"] = true,
+		["Chat"] = true,
+		["LocalizationService"] = true,
+		["TestService"] = true,
+		["VoiceChatService"] = true,
+		["CorePackages"] = true,
+		["NetworkServer"] = true,
+	}
+
 
 	addObject = function(root)
 		if nodes[root] then return end
@@ -1278,10 +1330,23 @@ local function main()
 	Explorer.NodeSorter = function(a,b)
 		if a.Del or b.Del then return false end -- Ghost node
 
+		local aPar = a.Parent
+		local bPar = b.Parent
 		local aClass = a.Class
 		local bClass = b.Class
 		if not aClass then aClass = a.Obj.ClassName a.Class = aClass end
 		if not bClass then bClass = b.Obj.ClassName b.Class = bClass end
+
+		-- Standard Roblox Studio hierarchy order for root services under game
+		if aPar == nodes[game] and bPar == nodes[game] then
+			local aName = a.Obj and a.Obj.Name or tostring(a.Obj)
+			local bName = b.Obj and b.Obj.Name or tostring(b.Obj)
+			local aRootOrder = RootServiceOrder[aClass] or RootServiceOrder[aName] or 9999
+			local bRootOrder = RootServiceOrder[bClass] or RootServiceOrder[bName] or 9999
+			if aRootOrder ~= bRootOrder then
+				return aRootOrder < bRootOrder
+			end
+		end
 
 		local aOrder = explorerOrders[aClass]
 		local bOrder = explorerOrders[bClass]
@@ -1323,8 +1388,19 @@ local function main()
 				tSort(root,sortFunc)
 				root.Sorted = true
 			end
+			local isRootGame = (root == nodes[game])
+			local hideInternal = (Settings.Explorer.HideInternalServices ~= false)
 			for i = 1,#root do
 				local n = root[i]
+
+				if isRootGame and hideInternal then
+					local o = n.Obj
+					local cName = n.Class or (o and o.ClassName)
+					local name = o and o.Name
+					if not AllowedServices[cName] and not AllowedServices[name] then
+						continue
+					end
+				end
 
 				if (isSearching and not searchResults[n]) or n.Del then continue end
 
@@ -3011,10 +3087,19 @@ local service = service
 %s
 local function search(root)	
 %s
-	
+	local isRootGame = (root == nodes[game])
+	local hideInternal = (Settings.Explorer.HideInternalServices ~= false)
 	local expandedpar = false
 	for i = 1,#root do
 		local node = root[i]
+		if isRootGame and hideInternal then
+			local o = node.Obj
+			local cName = node.Class or (o and o.ClassName)
+			local name = o and o.Name
+			if not AllowedServices[cName] and not AllowedServices[name] then
+				continue
+			end
+		end
 		local obj = node.Obj
 		
 %s
@@ -3043,7 +3128,7 @@ return search]==]
 		if not s or not func then return nil,specFilterList end
 
 		local env = setmetatable({["searchResults"] = searchResults, ["nodes"] = nodes, ["Explorer"] = Explorer, ["specResults"] = specResults,
-			["service"] = service},{__index = getfenv()})
+			["service"] = service, ["Settings"] = Settings, ["AllowedServices"] = AllowedServices},{__index = getfenv()})
 		setfenv(func,env)
 
 		return func(),specFilterList
@@ -3067,8 +3152,18 @@ return search]==]
 
 			local function defaultSearch(root)
 				local expandedpar = false
+				local isRootGame = (root == nodes[game])
+				local hideInternal = (Settings.Explorer.HideInternalServices ~= false)
 				for i = 1,#root do
 					local node = root[i]
+					if isRootGame and hideInternal then
+						local o = node.Obj
+						local cName = node.Class or (o and o.ClassName)
+						local name = o and o.Name
+						if not AllowedServices[cName] and not AllowedServices[name] then
+							continue
+						end
+					end
 					local obj = node.Obj
 
 					if find(lower(tostring(obj)),lowerQuery,1,true) then
@@ -14088,6 +14183,14 @@ local function main()
 			Settings.Explorer.CopyPathUseGetChildren = copypathUseChildren.Toggled
 		end)
 		
+		local hideInternal = AddCheckbox("Hide Internal Services", Settings.Explorer.HideInternalServices ~= false)
+		hideInternal.OnInput:Connect(function()
+			Settings.Explorer.HideInternalServices = hideInternal.Toggled
+			if Apps.Explorer and Apps.Explorer.Active then
+				Apps.Explorer.ForceUpdate()
+			end
+		end)
+		
 		AddSeperator("Properties")
 
 		local showDeprecated = AddCheckbox("Show Deprecated", Settings.Properties.ShowDeprecated)
@@ -14241,7 +14344,8 @@ DefaultSettings = (function()
 			AutoUpdateMode = 0, -- 0 Default, 1 no tree update, 2 no descendant events, 3 frozen
 			PartSelectionBox = true,
 			GuiSelectionBox = true,
-			CopyPathUseGetChildren = true
+			CopyPathUseGetChildren = true,
+			HideInternalServices = true
 		},
 		Properties = {
 			_Recurse = true,

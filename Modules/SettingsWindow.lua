@@ -326,6 +326,14 @@ local function main()
 			Settings.Explorer.CopyPathUseGetChildren = copypathUseChildren.Toggled
 		end)
 		
+		local hideInternal = AddCheckbox("Hide Internal Services", Settings.Explorer.HideInternalServices ~= false)
+		hideInternal.OnInput:Connect(function()
+			Settings.Explorer.HideInternalServices = hideInternal.Toggled
+			if Apps.Explorer and Apps.Explorer.Active then
+				Apps.Explorer.ForceUpdate()
+			end
+		end)
+		
 		AddSeperator("Properties")
 
 		local showDeprecated = AddCheckbox("Show Deprecated", Settings.Properties.ShowDeprecated)
